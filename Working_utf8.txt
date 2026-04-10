@@ -1,0 +1,40 @@
+С чем согласен (подтверждено кодом)
+Нет страницы /login, при этом NextAuth ведёт на неё: auth-options.ts:52.
+Онбординг не вызывает регистрацию API, а кладёт временного юзера в Zustand: registration-screen.tsx:132, registration-screen.tsx:139, use-app-store.ts:298.
+Верификация email сейчас симулируется через setTimeout: verification-screen.tsx:60.
+Realtime не доведён: TODO по new_message в UI: page.tsx:123.
+Кнопки скрепки/микрофона без обработчиков: message-input.tsx:82, message-input.tsx:140.
+Медиа в bubble не рендерится (только message.content): message-bubble.tsx:140.
+OpenClaw fail-open при ошибке API (isSafe: true): openclaw/moderate/route.ts:243.
+В чате есть bypass модерации (Send Anyway) и fail-open при исключении: chat-view.tsx:219, chat-view.tsx:719.
+Категории banditism/murder отсутствуют в валидных категориях OpenClaw: openclaw/moderate/route.ts:23.
+images.remotePatterns слишком широкие ("**"): next.config.ts:114.
+В TS выключены важные проверки: tsconfig.json:13, tsconfig.json:31, tsconfig.json:32.
+Мёртвый hello-world API: api/route.ts:1.
+Relay на SQLite и жёсткий file:./presidium.db: relay schema:6, relay schema:7.
+OTP логируется и возвращается в ответе: auth-service.ts:88, auth-service.ts:92.
+JWT передаётся в query для WS: use-websocket.ts:83, relay index.ts:616.
+Single-device поведение в relay (новое подключение закрывает старое): session-manager.ts:17.
+.zscripts не исключён из .gitignore, при этом каталог разросся; upload/ сильно разросся (2434 файла).
+PWA manifest отсутствует (public/manifest.json нет, src/app/manifest.ts нет).
+Что частично верно / неточно
+useWebSocket “не используется” — неточно: он используется в page.tsx:114, но не доведён до message pipeline.
+“Auth нет на AI/OpenClaw endpoint” — частично: в самих хендлерах (ai-in-chat, openclaw/chat|profile|recommend) нет getServerSession, но есть глобальный middleware на /api/*: middleware.ts:35.
+“x-user-id/x-user-email легко подделать” — сейчас неактуально: они ставятся middleware, и в API они нигде не используются.
+“Accent color не влияет” — устарело: применяется через data-accent: profile-screen.tsx:202, globals.css:106.
+“useIsMobile не используется” — неверно: используется в sidebar.tsx:69.
+“/api/auth/signin и /api/auth/signout нет” — формально неверно: их обслуживает catch-all NextAuth: nextauth route.ts:1. Но текущий authApi формат запроса может быть несовместим с ожидаемым потоком NextAuth.
+“Нет миграций вообще” — неверно: в main Prisma есть миграция (prisma/migrations/...), но в relay нет.
+“upload/ должен быть в gitignore” — уже есть: .gitignore:57. Проблема не в ignore, а в мусоре/объёме.
+Что лучше не добавлять сейчас (для web-версии)
+Сертификат-пиннинг, anti-debugging, jailbreak/root detection, secure enclave, screenshot protection как обязательные пункты.
+Полную реализацию Signal Protocol “с нуля” в одном рывке.
+Резкое удаление всего серверного слоя/Prisma до миграционного плана.
+Огромный “382-пунктный” backlog как единый scope (слишком рискованно и неуправляемо).
+Практичный фокус (что делать первым)
+Починить auth-контур: /login, единый источник истины (NextAuth vs Zustand), onboarding -> real register/sign-in.
+Закрыть критичные security-дыры: убрать fail-open у OpenClaw, ограничить remotePatterns, ротация ключей, rate limit на auth/messages/ai-in-chat/openclaw chat/profile/recommend.
+Довести чатовый pipeline: входящие/исходящие WS сообщения, обработка new_message, media send/render.
+Убрать технический мусор: .zscripts в ignore, чистка upload/, удалить мёртвые маршруты.
+Затем уже переходить к Marketplace/Library и архитектурной миграции local-first.
+

@@ -1,0 +1,1117 @@
+от ии выдал аудит - на сколько он отвечает действительности? 
+
+Критические проблемы
+#	Проблема
+1	API-ключ GLM-4 скомпрометирован — задокументировано в SECURITY.md
+2	Мёртвый код — /api/route.ts hello-world endpoint не удалён
+3	Изображения с любого HTTPS источника — hostname: "**" — SSRF-вектор
+4	SQLite захардкожен в схеме — не переключится на PostgreSQL без правки схемы
+5	relay-backend .env — файл с секретами в репозитории, JWT_SECRET может быть change-me-in-production
+6	noImplicitAny: false — отключена важная проверка типов
+---
+Высокий приоритет
+#	Проблема
+7	upload/ содержит архивы и файлы предыдущих сессий
+8	.zscripts/ — 25 файлов (логи, PID), должны быть в .gitignore
+9	Нет CSRF-защиты на API-роутах
+10	Rate limiting только на AI и OpenClaw эндпоинтах
+11	localStorage хранит сообщения в plaintext — противоречит «privacy-first»
+12	Нет виртуализации списков — проблемы с производительностью на больших данных
+13	Mock-данные (~650 строк) загружаются на каждой странице
+---
+Средний приоритет
+#	Проблема
+14	Accent color сохраняется, но не влияет на CSS-переменные
+15	CSP в dev-режиме допускает unsafe-inline/unsafe-eval
+16	noUnusedLocals и noUnusedParameters отключены
+17	Заголовки x-user-id/x-user-email из middleware могут быть подделены клиентом
+---
+Сильные стороны
+- Современный стек (Next.js 16, TS strict, Tailwind 4)
+- Comprehensive security headers (HSTS, CSP, X-Frame-Options, Permissions-Policy)
+- Детальная документация (API, аудит, безопасность)
+- i18n (EN/RU), 48 shadcn/ui компонентов
+- Чистая архитектура с разделением на слои
+- Relay-backend с argon2, JWT, E2EE key bundle
+
+Полный список недоделанных моментов и план действий
+---
+КРИТИЧЕСКИЕ (без этого приложение не работает)
+#	Что не сделано	Детали
+1	Нет страницы /login	NextAuth настроен на редирект на /login, но страница не существует > 404 для неавторизованных
+2	Нет UI компонента логина	Нет формы ввода email/password для входа
+3	Конфликт middleware и клиентской авторизации	Middleware требует NextAuth сессию, приложение использует Zustand isAuthenticated — две системы не связаны
+4	Онбординг не вызывает API регистрации	Registration screen сохраняет данные в Zustand, но не отправляет POST на /api/auth/register
+5	Онбординг использует mock-пользователя	completeOnboarding() устанавливает захардкоженного mock-юзера, а не реального
+6	Email-верификация симулирована	OTP-экран фальсифицирует проверку через setTimeout, реальной отправки/проверки нет
+7	WebSocket отключён от UI	useWebSocket hook существует, но нигде не используется в chat-view/message-input
+8	Реалтайм-сообщения не работают	TODO в page.tsx:123 — «wire realtime message payload into store update flow»
+---
+ЧАТЫ И ВЗАИМОДЕЙСТВИЯ (основной функционал мессенджера)
+#	Что не сделано	Статус
+9	Emoji picker	Полностью отсутствует
+10	Стикеры	Полностью отсутствуют
+11	Реакции на сообщения	Полностью отсутствуют
+12	GIF	Только мок-UI, нет Giphy/интеграции
+13	Отправка файлов/изображений	Кнопка скрепки есть, но без обработчика — не открывает file picker
+14	Рендеринг медиа в сообщениях	MessageBubble рендерит только message.content как текст — картинки/файлы не отображаются
+15	Голосовые сообщения	Кнопка микрофона есть, но без обработчика — нет записи/воспроизведения
+16	Звонки (аудио/видео)	Call screen — мок-UI, нет WebRTC вообще
+17	Редактирование сообщений	Backend API есть, но нет UI-триггера и store action
+18	Удаление сообщений	Backend API есть, пункт контекстного меню без обработчика
+19	Ответ/цитирование	Пункт в контекстном меню есть, обработчика нет
+20	Пересылка сообщений	Пункт в контекстном меню есть, обработчика нет
+21	Закрепление сообщений	Пункт в контекстном меню есть, обработчика нет
+22	Индикаторы прочтения	Иконки рендерятся, но нет автоматических переходов состояний (sending>sent>delivered>read)
+23	Индикатор набора текста	WS-инфраструктура готова, но не вызывается из UI
+24	Поиск сообщений внутри чата	Не реализован
+25	unreadCount, isPinned, isMuted	TODO в chats/route.ts — не считаются/не хранятся
+---
+БЕЗОПАСНОСТЬ И АВТОРИЗАЦИЯ
+#	Что не сделано	Детали
+26	2FA — только UI	Нет бэкенда, нет TOTP/QR/SMS, состояние не сохраняется
+27	Нет восстановления пароля	Нет UI и API для forgot password
+28	Нет защиты от брутфорса	Нет rate limiting на login, нет lockout аккаунта
+29	Нет CSRF-защиты	API-роуты без CSRF-токенов
+30	Нет /api/auth/signin и /api/auth/signout	API client вызывает эти эндпоинты, но они не существуют как отдельные роуты
+31	API-ключ GLM-4 скомпрометирован	Задокументировано в SECURITY.md — нужно перевыпустить
+32	relay-backend .env в репо	Файл с секретами, JWT_SECRET может быть change-me-in-production
+---
+UI/UX И ИНФРАСТРУКТУРА
+#	Что не сделано	Детали
+33	ErrorBoundary не подключён	Компонент есть, но нигде не используется
+34	useIsMobile hook не используется	Определён, но не импортируется
+35	useErrorHandler hook не используется	Определён, но не импортируется
+36	empty-state.tsx не используется	Компонент есть, но не импортируется
+37	Edit Profile не сохраняет	Кнопка «Save» показывает визуальный фидбек, но не обновляет store
+38	Group creation использует мок-контакты	Вместо реальных контактов из store
+39	call-screen view не зарегистрирован	Компонент есть, но нет в роутинг-свитче page.tsx
+40	Нет индикатора офлайн-состояния	WebSocket reconnect есть, но UI не показывает отключение
+41	Нет PWA manifest / service worker	Приложение не устанавливаемо
+42	Нет loading/skeleton состояний	При начальной загрузке данных
+43	Accent color не влияет на тему	Сохраняется, но CSS-переменные не обновляются
+44	Нет виртуализации списков	Сообщения, посты, контакты рендерятся полностью — лаги на больших данных
+45	Mock-данные загружаются всегда	~650 строк мок-данных на каждой загрузке
+46	Favorites screen fallback на мок	Когда store пустой — показывает мок-данные
+---
+API И БЭКЕНД
+#	Что не сделано	Детали
+47	Мёртвый /api/route.ts	Hello-world stub, должен быть удалён
+48	Нет Zod-валидации	/api/messages/[id] PATCH, /api/openclaw/*, /api/ai-in-chat
+49	Нет auth на AI/OpenClaw	/api/ai-in-chat, /api/openclaw/chat, /api/openclaw/profile, /api/openclaw/recommend — без проверки авторизации
+50	SQLite захардкожен в Prisma	Схема не переключится на PostgreSQL без правок
+51	Rate limiting неполный	Только на AI chat и OpenClaw moderate — остальные эндпоинты без лимитов
+---
+# ПЛАН ДЕЙСТВИЙ
+## Фаза 1: Критическая — запуск приложения (1-3 дня)
+1. **Создать страницу /login** с формой email/password, подключённой к NextAuth signIn()
+2. **Связать middleware и Zustand auth** — либо убрать middleware, либо синхронизировать с NextAuth сессией
+3. **Подключить онбординг к API** — registration screen > POST /api/auth/register > signIn() > completeOnboarding()
+4. **Удалить mock-пользователя** из completeOnboarding() — использовать реального залогиненного юзера
+5. **Удалить /api/route.ts** (мёртвый код)
+6. **Убрать .env из relay-backend** из репозитория, добавить в .gitignore
+## Фаза 2: Чаты — базовый функционал (3-5 дней)
+7. **Подключить WebSocket к UI** — импортировать useWebSocket в chat-view.tsx и message-input.tsx
+8. **Реализовать отправку файлов** — обработчик на кнопке скрепки > file picker > POST /api/upload > отправка сообщения с mediaUrl
+9. **Рендеринг медиа в MessageBubble** — показывать картинки, файлы, превью
+10. **Редактирование и удаление сообщений** — подключить обработчики контекстного меню к store actions и API
+11. **Ответ/цитирование** — UI для reply, рендеринг цитаты в bubble
+12. **Индикатор набора текста** — вызывать sendTyping() из message-input при вводе
+13. **Индикаторы прочтения** — автоматические переходы состояний + markAsRead() action
+## Фаза 3: Контент и медиа (3-5 дней)
+14. **Emoji picker** — добавить компонент (например, emoji-picker-react), интеграция в message-input
+15. **Голосовые сообщения** — MediaRecorder API > запись > upload > воспроизведение в bubble
+16. **GIF** — интеграция Giphy/Tenor API, picker в message-input
+17. **Стикеры** — набор стикеров, picker, рендеринг в bubble
+18. **Реакции** — long-press на сообщении > picker emoji-реакций, WS broadcast
+## Фаза 4: Звонки (5-7 дней)
+19. **WebRTC интеграция** — RTCPeerConnection, getUserMedia, signaling через relay-backend
+20. **Аудиозвонки** — реальный audio stream между пользователями
+21. **Видеозвонки** — video stream + переключение камер
+22. **Call history** — сохранение реальных записей звонков вместо моков
+## Фаза 5: Безопасность (2-3 дня)
+23. **2FA backend** — TOTP генерация/верификация, хранение secret в БД
+24. **Восстановление пароля** — email с токеном, форма reset password
+25. **Rate limiting на login** — защита от брутфорса
+26. **CSRF-защита** — токены на все мутационные API-роуты
+27. **Перевыпуск GLM-4 API ключа**
+28. **Zod-валидация** на все эндпоинты без неё
+29. **Auth на AI/OpenClaw эндпоинтах**
+## Фаза 6: Полировка и оптимизация (2-3 дня)
+30. **Подключить ErrorBoundary** в layout.tsx и на ключевые view
+31. **Убрать неиспользуемые хуки** или подключить их
+32. **Виртуализация списков** — react-window или @tanstack/virtual для чатов и сообщений
+33. **Индикатор офлайн-состояния** — UI при потере WS-соединения
+34. **Accent color > CSS переменные** — реальное применение цвета к теме
+35. **Loading/skeleton состояния** при загрузке данных
+36. **Убрать мок-данные** из production-сборки
+37. **PWA manifest** + service worker для installability
+38. **Переключить Prisma на PostgreSQL** для production
+
+ПОЛНЫЙ СПИСОК НЕДОДЕЛАННЫХ МОМЕНТОВ
+Ты прав — я упустил огромную часть. Вот полный аудит по всем слоям.
+---
+1. АВТОРИЗАЦИЯ И АУТЕНТИФИКАЦИЯ (13 пунктов)
+#	Что не сделано
+1	Нет страницы /login — NextAuth редиректит на несуществующий роут
+2	Нет UI-компонента логина (форма email/password)
+3	Конфликт middleware (NextAuth) и клиентской auth (Zustand) — две несвязанные системы
+4	Онбординг не вызывает API регистрации — данные остаются в Zustand
+5	completeOnboarding() устанавливает mock-пользователя, а не реального
+6	Email-верификация — фейковая через setTimeout, нет реальной отправки OTP
+7	Нет /api/auth/signin и /api/auth/signout как отдельных роутов
+8	Нет восстановления пароля (forgot/reset password) — ни UI, ни API
+9	Нет защиты от брутфорса — rate limiting на login отсутствует
+10	2FA — только UI-компонент, нет бэкенда (TOTP, SMS, QR-код)
+11	Нет logout endpoint в relay-backend
+12	JWT не проверяется по таблице Session — отозванные токены работают
+13	Нет смены пароля, удаления аккаунта, смены email
+---
+2. ЧАТЫ — UI/UX (35 пунктов)
+#	Что не сделано
+14	Emoji picker — полностью отсутствует
+15	Стикеры — полностью отсутствуют
+16	Реакции на сообщения — полностью отсутствуют
+17	GIF — мок-UI, нет Giphy/Tenor интеграции
+18	Отправка файлов — кнопка скрепки БЕЗ onClick, нет file picker
+19	Рендеринг медиа в сообщениях — MessageBubble показывает только текст, игнорирует mediaUrl, mediaType, mediaName, mediaSize, mediaMimeType
+20	Голосовые сообщения — кнопка микрофона БЕЗ onClick, нет MediaRecorder, нет waveform
+21	Видео-кружки — тип video-circle есть, рендеринга нет
+22	Звонки (audio/video) — Call screen мок-UI, нуль WebRTC, нет RTCPeerConnection, нет getUserMedia
+23	Нет incoming call UI — нет экрана входящего звонка с accept/decline
+24	Нет picture-in-picture для видеозвонков
+25	Нет screen share
+26	Нет group calls
+27	Редактирование сообщений — backend API есть, нет UI-триггера, нет store action
+28	Удаление сообщений — backend API есть, пункт контекстного меню БЕЗ обработчика
+29	Нет диалога «Удалить у всех / Удалить у меня»
+30	Ответ/цитирование — пункт в контекстном меню есть, обработчика нет, нет reply bar в input
+31	Пересылка — пункт в контекстном меню есть, обработчика нет, нет UI выбора чата
+32	Закрепление сообщений — пункт есть, обработчика нет
+33	Индикаторы прочтения — иконки рендерятся, но нет автоматических переходов состояний, нет markAsRead()
+34	Индикатор набора текста — WS-инфраструктура готова, но не вызывается из UI (нет sendTyping() из message-input)
+35	Нет peer typing indicator в чате — только AI/OpenClaw typing
+36	Поиск сообщений внутри чата — не реализован
+37	Нет scroll-to-bottom FAB при прокрутке вверх
+38	Нет разделителей по дате между сообщениями
+39	Нет «X новых сообщений» divider
+40	Нет pinned messages bar вверху чата
+41	Нет выделения нескольких сообщений (multi-select mode)
+42	Нет предпросмотра ссылок (Open Graph cards)
+43	Нет рендеринга кода с подсветкой синтаксиса
+44	Нет markdown-рендеринга в сообщениях
+45	Нет drag-and-drop файлов в чат
+46	Нет paste изображений из буфера обмена
+47	Нет draft persistence — текст теряется при навигации
+48	Нет character counter в input
+---
+3. WEBSOCKET / REALTIME (15 пунктов)
+#	Что не сделано
+49	useWebSocket hook нигде не используется в chat-view/message-input
+50	Реалтайм-сообщения не работают — TODO в page.tsx:123
+51	Нет UI индикатора подключения/отключения WebSocket
+52	Нет UI «Reconnecting...» при потере соединения
+53	Нет очереди сообщений для отправки при отключении
+54	Нет sendReadReceipt() функции на клиенте
+55	Нет presence broadcasting (online/offline статусы через WS)
+56	Нет WebRTC signaling через WS (offer/answer/ICE)
+57	Серверный WS никогда не инициализирован — initializeWebSocketServer не вызывается
+58	Нет rate limiting на WS-сообщения
+59	Нет message validation на сервере перед broadcast
+60	Нет offline message queue — сообщения офлайн-пользователям теряются
+61	Нет graceful shutdown WS-сервера
+62	Нет connection limit per user
+63	Нет room cleanup (пустые чаты не garbage collect)
+---
+4. FEED / СОЦИАЛЬНАЯ ЛЕНТА (20 пунктов)
+#	Что не сделано
+64	Все посты — мок-данные — API для feed не существует
+65	Нет API endpoint /api/feed/posts — ни GET, ни POST
+66	Нет feedApi в api-client.ts
+67	Создание поста — сохраняется только в localStorage, не на сервер
+68	Лайки/дизлайки/репосты — не персистятся, теряются при рефреше
+69	Комментарии — не персистятся, нет вложенных комментариев
+70	Лайки комментариев — только отображение, нет интерактива
+71	Поиск по ленте — ничего не делает
+72	Фильтрация по темам — не работает
+73	Табы (recommendations/interests/popular) — все показывают одинаковые данные
+74	Нет медиа-вложений в постах — нет изображений, видео, ссылок
+75	Нет загрузки изображений при создании поста
+76	Нет пагинации / infinite scroll
+77	Нет loading/skeleton состояний
+78	Нет error states
+79	Нет bookmark/save постов
+80	Нет share постов
+81	Нет report постов
+82	Нет ссылок на каналы/авторов — имена не кликабельны
+83	Нет draft saving при создании поста
+---
+5. MARKETPLACE (15 пунктов)
+#	Что не сделано
+84	Checkout — no-op — кнопка просто закрывает корзину, нет оплаты
+85	Нет marketplace API routes в Next.js — всё зависит от relay-сервера
+86	Нет marketplaceApi в api-client.ts
+87	Нет загрузки изображений — только URL-строка
+88	Нет галереи изображений для товаров (одно фото)
+89	Нет edit/delete листингов
+90	Нет order history
+91	Нет refund/cancellation
+92	Нет seller messaging
+93	Нет seller ratings/reviews
+94	Нет price history
+95	Нет pagination — limit=60 без offset
+96	Нет notification о покупке продавцу
+97	Нет report товара
+98	Если relay-сервер не запущен — весь marketplace сломан без graceful fallback
+---
+6. LIBRARY / КНИГИ (12 пунктов)
+#	Что не сделано
+99	Нет API routes для library в Next.js — зависит от relay
+100	Нет libraryApi в api-client.ts
+101	Нет «Add to library» — нельзя добавить книгу
+102	Нет download книг
+103	Нет book detail page — каталог сразу ведёт в reader
+104	Нет ratings/reviews книг
+105	Нет recommendations
+106	Нет annotations/highlights в reader
+107	Нет text search внутри книги
+108	Нет offline reading
+109	Нет font family selection — только размер
+110	Error state в store есть, но НЕ рендерится в UI
+---
+7. ПРОФИЛЬ / НАСТРОЙКИ / АККАУНТ (25 пунктов)
+#	Что не сделано
+111	Edit Profile save — не сохраняет — только визуальный фидбек, нет API call, не обновляет store
+112	Personal data bio/birthday save — не сохраняет — закрывает режим редактирования, данные теряются
+113	Create channel — не создаёт — handleCreate() только goBack()
+114	Все notification settings эфемерны — теряются при каждой навигации, не связаны с store
+115	Privacy toggles (read receipts, online status, typing) — эфемерны
+116	PIN toggle — эфемерен, не в persist config
+117	Device revoke button — без обработчика
+118	Clear cache — не чистит, только визуальный фидбек
+119	Call callback button — без обработчика
+120	Call row click — без обработчика
+121	Favorite cards не кликабельны — нет навигации к исходному сообщению
+122	Avatar upload — не работает — камера-иконка без file picker
+123	Устройства — мок-данные (3 захардкоженных устройства)
+124	Нет API /api/sessions — list/revoke сессий
+125	Нет API /api/users/[id]/2fa
+126	Нет API /api/users/[id]/preferences
+127	Нет API /api/users/[id]/storage
+128	Нет API /api/favorites
+129	Нет API /api/channels
+130	Нет API /api/calls — call history
+131	Нет API /api/notifications — notification preferences
+132	QR-код — захардкоженная сетка 7?7, не настоящий QR
+133	Нет валидации форм — edit profile (имя, username, email, phone, bio)
+134	Нет loading/error states ни на одном profile-экране
+135	Нет GDPR data export
+---
+8. AI CENTER / OPENCLAW (20 пунктов)
+#	Что не сделано
+136	Нет SSE/streaming — AI-ответы блокирующие, пользователь видит спиннер
+137	Нет abort/cancel дляInProgress AI-запросов — нет AbortController
+138	Moderation bypass on error — /api/openclaw/moderate возвращает isSafe: true при ошибке — уязвимость
+139	Нет auth на 4 из 6 AI endpoints — ai-in-chat, openclaw/chat, openclaw/profile, openclaw/recommend
+140	Нет rate limiting на 4 из 6 AI endpoints
+141	Нет загрузки conversation history из БД — in-memory Map теряется при рестарте
+142	Нет GET endpoint для AI conversations
+143	Нет token counting нигде в AI-стеке
+144	Нет context window management — trimming по количеству сообщений, не по токенам
+145	Нет markdown-рендеринга AI-ответов — whitespace-pre-wrap
+146	Нет regenerate response кнопки
+147	Нет copy-to-clipboard для AI-ответов
+148	Нет stop generating кнопки
+149	Нет retry на AI failure
+150	Нет request timeout на GLM-4 вызовы
+151	Нет fallback provider — только GLM-4
+152	Нет AI usage analytics — токены, стоимость, ошибки
+153	Нет model version tracking
+154	Нет conversation export
+155	Нет mode switcher UI в активном чате
+---
+9. RELAY BACKEND (40+ пунктов)
+#	Что не сделано
+156	Нет message persistence — сообщения не сохраняются в БД
+157	Нет offline message queue — сообщения офлайн-пользователям теряются
+158	Нет graceful shutdown — нет SIGTERM/SIGINT handlers
+159	Нет rate limiting ни на одном endpoint
+160	OTP логируется в консоль и возвращается в ответе
+161	Нет email-отправки OTP — только console.log
+162	Нет input validation library (Zod/Joi) — всё manual
+163	Нет request body size limits — уязвимость
+164	Нет multi-device support — 1 соединение на пользователя, второе кикает первое
+165	Нет message ordering — нет sequence numbers
+166	Нет duplicate message detection — нет message IDs
+167	Нет message acknowledgment — ack тип есть, не обрабатывается
+168	Нет delivery receipts
+169	Нет read receipts
+170	Нет block list check при маршрутизации сообщений
+171	Нет group message routing через WS
+172	Нет channel broadcast через WS
+173	Нет presence heartbeat (server-initiated)
+174	Presence broadcast ВСЕМ клиентам, а не только контактам
+175	lastSeen обновляется неправильно — при online, а не offline
+176	Нет E2EE реализации — только pre-key storage, нет X3DH, нет Double Ratchet
+177	Нет signed pre-key signature verification
+178	Нет key rotation policy
+179	Нет structured logging — только console.log
+180	Нет uncaught exception / unhandled rejection handlers
+181	Нет security headers (CSP, X-Frame-Options, etc.)
+182	Нет JWT в secure transport для WS — передаётся в query param
+183	Нет pagination на list endpoints
+184	Нет GET/PUT/DELETE для groups (по ID)
+185	Нет GET/PUT/DELETE для channels (по ID)
+186	Нет file/image upload endpoints
+187	Нет purchase payment processing — только mark as sold
+188	Нет notification о покупке
+189	Нет dispute resolution
+190	Нет WebSocket compression
+191	Нет API documentation (OpenAPI/Swagger)
+192	Нет health check с проверкой БД
+193	Нет connection metadata (IP, user agent)
+194	Нет horizontal scaling support — in-memory sessions
+195	Дубликат db.ts и prisma.ts — один из них dead code
+---
+10. БАЗА ДАННЫХ / SCHEMA (30+ пунктов)
+#	Что не сделано
+196	Нет 27 моделей в main schema: Reaction, Sticker, FeedPost, FeedComment, CallRecord, Channel, ChatFolder, PinnedMessage, ForwardedMessage, MessageReply, UserBlock, Report, AuditLog, Notification, Device, ChatArchive, SharedMedia, MessageBookmark, и др.
+197	Нет Message модели в relay-backend — критический пробел
+198	Нет миграций — оба schema без migrations/ директории
+199	Нет soft delete ни в одной модели
+200	Нет enum типов — все статусы как String
+201	Нет индексов на часто запрашиваемых полях
+202	Missing cascade delete rules — 4 в main, 3 в relay
+203	30+ type mismatches между frontend и backend
+204	Нет триггеров для unreadCount, lastMessage, memberCount
+205	SQLite в обоих schema — не подходит для production
+206	Два разных User/Account — main schema и relay-backend, не синхронизированы
+207	Нет shared ID system между main и relay
+208	Book.content хранится как String — неэффективно
+209	Bookmarks как JSON string — должна быть отдельная модель
+210	Нет MessageEditHistory — не отслеживаются редактирования
+211	Нет FileAttachment модели
+212	Нет VoiceMessage модели
+---
+11. UI/UX ОБЩЕЕ (20 пунктов)
+#	Что не сделано
+213	ErrorBoundary определён, но НЕ подключён нигде в дереве компонентов
+214	useIsMobile hook не используется
+215	useErrorHandler hook не используется
+216	empty-state.tsx не используется
+217	Нет виртуализации списков — сообщения, посты, контакты рендерятся полностью
+218	Нет PWA manifest / service worker — приложение не устанавливаемо
+219	Нет offline indicator — UI не показывает отключение
+220	Нет loading/skeleton состояний при начальной загрузке
+221	Accent color не влияет на CSS-переменные
+222	Mock-данные (~650 строк) загружаются всегда
+223	call-screen view не зарегистрирован в роутинг-свитче
+224	Нет accessibility audit — многим кнопкам не хватает aria-label
+225	Нет keyboard shortcuts (Ctrl+Enter для отправки, Esc для закрытия)
+226	Нет haptic feedback на мобильных
+227	Нет pull-to-refresh ни на одном экране
+228	Нет notification badge на элементах навигации
+229	Нет desktop sidebar menu для аватара пользователя (logout, status)
+230	Нет анимации exit для удаляемых сообщений
+231	Нет анимации переключения между чатами
+232	Нет wallpaper customization для чатов
+---
+12. БЕЗОПАСНОСТЬ (10 пунктов)
+#	Что не сделано
+233	API-ключ GLM-4 скомпрометирован — нужно перевыпустить
+234	relay-backend .env в репозитории — секреты могут быть утечены
+235	Нет CSRF-защиты на API-роутах
+236	Нет rate limiting на большинстве endpoints
+237	images.remotePatterns: "**" — SSRF-вектор
+238	Нет Zod-валидации на нескольких endpoints
+239	localStorage хранит сообщения в plaintext
+240	Нет content filtering на AI-ответах
+241	Нет audit logging
+242	/api/route.ts — мёртвый код
+---
+# ПЛАН ДЕЙСТВИЙ
+## Фаза 0: Критический фикс (1-2 дня)
+- Создать /login страницу с формой
+- Связать middleware и Zustand auth
+- Подключить онбординг к API регистрации
+- Удалить mock-пользователя из completeOnboarding()
+- Удалить /api/route.ts
+- Убрать .env из relay-backend в .gitignore
+- Перевыпустить GLM-4 API ключ
+## Фаза 1: Чаты — базовый функционал (5-7 дней)
+- Подключить WebSocket к UI (useWebSocket в chat-view)
+- Инициализировать WS-сервер в Next.js
+- Реализовать отправку файлов (скрепка > file picker > upload)
+- Рендеринг медиа в MessageBubble
+- Редактирование/удаление сообщений (UI + store + API)
+- Ответ/цитирование (reply bar + rendering)
+- Индикатор набора текста (sendTyping из input)
+- Индикаторы прочтения (markAsRead + transitions)
+- Emoji picker интеграция
+## Фаза 2: Медиа и контент (5-7 дней)
+- Голосовые сообщения (MediaRecorder > upload > playback)
+- GIF интеграция (Giphy/Tenor)
+- Стикеры (набор + picker + rendering)
+- Реакции на сообщения (long-press > picker > WS broadcast)
+- Видео-кружки
+- Drag-and-drop файлов
+- Paste изображений из буфера
+## Фаза 3: Звонки (7-10 дней)
+- WebRTC интеграция (RTCPeerConnection, getUserMedia)
+- Signaling через relay-backend
+- Аудиозвонки
+- Видеозвонки + picture-in-picture
+- Incoming call UI
+- Call history persistence
+## Фаза 4: Feed / Marketplace / Library (5-7 дней)
+- Создать API routes для feed posts
+- Подключить feed к реальному API
+- Создать marketplace API routes (или подключить relay)
+- Реализовать checkout
+- Создать library API routes
+- Реализовать «Add to library»
+- Добавить пагинацию / infinite scroll везде
+- Добавить loading/error states
+## Фаза 5: Профиль / Настройки (3-5 дней)
+- Подключить Edit Profile save к API
+- Подключить Personal data save к API
+- Реализовать Create channel
+- Подключить notification settings к store и API
+- Реализовать avatar upload
+- Создать API: sessions, 2FA, preferences, storage, favorites, channels, calls
+- Реализовать 2FA backend (TOTP)
+- Реализовать восстановление пароля
+- Настоящий QR-код
+## Фаза 6: AI Center (3-5 дней)
+- SSE/streaming для AI-ответов
+- AbortController для отмены запросов
+- Fix moderation bypass (не возвращать isSafe: true при ошибке)
+- Добавить auth на все AI endpoints
+- Добавить rate limiting на все AI endpoints
+- Загрузка conversation history из БД
+- Token counting
+- Markdown-рендеринг ответов
+- Regenerate / copy / stop generating
+## Фаза 7: Relay Backend (5-7 дней)
+- Message persistence в БД
+- Offline message queue
+- Graceful shutdown (SIGTERM/SIGINT)
+- Rate limiting на все endpoints
+- OTP через email (не console.log)
+- Input validation (Zod)
+- Request body size limits
+- Multi-device support
+- Message ordering + duplicate detection
+- Delivery/read receipts
+- Group/channel WS routing
+- Structured logging
+- Security headers
+- Health check с проверкой БД
+## Фаза 8: База данных (3-5 дней)
+- Добавить 27+ недостающих моделей
+- Добавить Message модель в relay-backend
+- Создать миграции
+- Добавить soft delete
+- Добавить enum типы
+- Добавить индексы
+- Добавить cascade delete rules
+- Синхронизировать типы frontend - backend
+- Перейти на PostgreSQL
+## Фаза 9: Полировка (3-5 дней)
+- Подключить ErrorBoundary
+- Виртуализация списков (react-window)
+- PWA manifest + service worker
+- Offline indicator
+- Accent color > CSS переменные
+- Loading/skeleton состояния
+- Убрать мок-данные
+- Keyboard shortcuts
+- Accessibility audit
+- Pull-to-refresh
+- Notification badges
+Ты указал, что все данные локально и OpenClaw локально 24/7. Реальность кардинально отличается:
+OpenClaw — ТЕКУЩЕЕ СОСТОЯНИЕ vs ТРЕБОВАНИЯ
+Требование	Реальность
+Локальный	Вызывает внешний GLM-4 API (Zhipu AI, Китай) или ZAI SDK
+Невозможно выключить	Fail-open: при ошибке API сообщение проходит без модерации
+Модерирует ВСЁ	Только текст. Нет модерации изображений, файлов, голосовых, видео
+Входящие сообщения	НЕ модерируются вообще
+24/7	Только при отправке текущим пользователем
+бандитизм	Нет в категориях
+убийства	Нет в категориях
+криминал	Только "fraud" — подмножество
+Заблокированные нельзя отправить	Кнопка "Send Anyway" позволяет обойти
+---
+ДОПОЛНИТЕЛЬНЫЕ НЕДОЧЁТЫ (новые, не указанные ранее)
+OPENCLAW — СПЕЦИФИЧЕСКИЕ (15 пунктов)
+#	Что не сделано
+1	Нет локальной AI-модели — OpenClaw вызывает облачный GLM-4 API
+2	Нет модерации входящих сообщений — сообщения от других пользователей проходят без проверки
+3	Нет модерации изображений — можно отправить любую картинку
+4	Нет модерации файлов — можно отправить любой файл
+5	Нет модерации голосовых сообщений — можно отправить любой аудио
+6	Нет модерации видео — можно отправить любое видео
+7	Нет OCR — текст на изображениях не проверяется
+8	Категория «бандитизм» отсутствует в VALID_CATEGORIES
+9	Категория «убийства» отсутствует в VALID_CATEGORIES
+10	Fail-open при ошибке — если moderation API упал, сообщение проходит
+11	Кнопка «Send Anyway» — пользователь может обойти модерацию
+12	Rate limit 24 req/10s — при активной переписке модерация будет блокироваться 429
+13	Нет repeat offender tracking — нет учёта повторных нарушений пользователем
+14	Нет автоматической блокировки нарушителей
+15	Нет логирования нарушений — moderationResults не персистятся в БД
+---
+ХРАНЕНИЕ ДАННЫХ — ЛОКАЛЬНАЯ АРХИТЕКТУРА (20 пунктов)
+#	Что не сделано
+16	Сообщения дублируются — localStorage + серверная SQLite
+17	Чаты дублируются — localStorage + серверная SQLite
+18	Контакты в 3 местах — localStorage + main SQLite + relay SQLite
+19	Профиль в 3 местах — localStorage + main SQLite + relay SQLite
+20	Нет IndexedDB — localStorage лимит 5-10 МБ, нет fallback
+21	Нет шифрования localStorage — все данные в plaintext JSON
+22	Нет обработки QuotaExceededError — приложение сломается при заполнении
+23	Нет LRU eviction — старые данные не удаляются автоматически
+24	Серверная БД не нужна — relay-backend хранит 15 моделей, которые должны быть локальными
+25	Нет P2P-синхронизации — если данные только локальные, как пользователи общаются?
+26	Нет механизма E2EE для локальных данных — crypto.subtle не используется
+27	Нет деривации ключа шифрования от PIN/пароля пользователя
+28	AI conversations в 3 местах — localStorage + in-memory Map + SQLite
+29	Нет локальной БД для больших данных — книги, медиа, история сообщений
+30	Sync-логика конфликтует — syncChats()/syncContacts() тянут с сервера
+31	Нет миграции localStorage — при смене схемы данные ломаются
+32	Нет бэкапа локальных данных — пользователь потеряет всё при очистке браузера
+33	Нет экспорта/импорта данных — нельзя перенести на другое устройство
+34	Два разных User/Account — main schema и relay-backend, не синхронизированы
+35	Нет shared ID system между main и relay
+---
+MESSAGE PIPELINE — ПОЛНЫЙ РАЗРЫВ (12 пунктов)
+#	Что не сделано	Приоритет
+36	sendMessage() не вызывает API — сообщения остаются только в localStorage	Критический
+37	WebSocket не используется для отправки сообщений	Критический
+38	Входящие WS-сообщения игнорируются — TODO в page.tsx:122-124	Критический
+39	senderId захардкожен как 'user-1'	Высокий
+40	senderName захардкожен как 'You'	Высокий
+41	Статус всегда 'sent' — никогда не обновляется до delivered/read	Высокий
+42	Нет очереди сообщений для офлайн-режима	Высокий
+43	Нет retry логики при неудачной отправке	Высокий
+44	Нет серверной модерации на /api/messages — можно обойти фронтенд	Критический
+45	Два store не синхронизированы — useAppStore и useApiStore	Высокий
+46	Нет message_sent WS-события от клиента	Критический
+47	WS-сервер не инициализирован — initializeWebSocketServer не вызывается	Критический
+---
+RELAY BACKEND — ДЛЯ ЛОКАЛЬНОЙ АРХИТЕКТУРЫ НЕ НУЖЕН (10 пунктов)
+#	Что не сделано	Приоритет
+48	Relay-backend хранит 15 моделей — всё должно быть локально	Критический
+49	Нет Message модели в relay-backend — сообщения не персистятся	Критический
+50	Offline message queue отсутствует — сообщения теряются	Критический
+51	Нет graceful shutdown — SIGTERM/SIGINT не обрабатываются	Высокий
+52	OTP логируется в консоль — утечка кодов верификации	Критический
+53	Нет email-отправки OTP — только console.log	Критический
+54	Multi-device не поддерживается — 2-е устройство кикает 1-е	Высокий
+55	Нет E2EE реализации — только pre-key storage, нет X3DH/Double Ratchet	Критический
+56	Presence broadcast ВСЕМ — не только контактам	Высокий
+57	lastSeen обновляется неправильно — при online вместо offline	Высокий
+---
+UX/UI — ДОПОЛНИТЕЛЬНЫЕ (30+ пунктов)
+#	Что не сделано	Приоритет
+58	Нет swipe-to-reply на мобильных	Средний
+59	Нет swipe-to-archive на чатах	Средний
+60	Нет swipe-to-delete на чатах	Средний
+61	Нет long-press на сообщениях — только right-click	Средний
+62	Нет long-press на фид-постах	Низкий
+63	Нет long-press на контактах	Низкий
+64	Нет pull-to-refresh ни на одном экране	Средний
+65	Нет Ctrl+K для глобального поиска	Средний
+66	Нет Ctrl+Enter для отправки сообщения	Средний
+67	Нет Escape для закрытия модалок	Средний
+68	Нет copy-to-clipboard для сообщений (handler не подключён)	Средний
+69	Нет copy phone/username из профиля контакта	Средний
+70	Нет Web Share API интеграции	Низкий
+71	Нет drag-and-drop файлов в чат	Средний
+72	Нет paste изображений из буфера	Средний
+73	Нет image zoom при клике	Средний
+74	Нет fullscreen image viewer	Средний
+75	Нет trash/recycle bin для удалённых чатов	Средний
+76	Нет undo после удаления	Средний
+77	Нет archive view — архивировать можно, посмотреть нельзя	Средний
+78	Нет bulk operations — мульти-выделение не работает	Средний
+79	Нет export chat history	Средний
+80	Нет import contacts (CSV, vCard)	Средний
+81	Нет print chat	Низкий
+82	Нет offline banner	Высокий
+83	Нет connection quality indicator	Средний
+84	Нет queued messages indicator	Средний
+85	Нет last synced timestamp	Низкий
+86	Нет global font size setting	Низкий
+87	Нет reading time estimates	Низкий
+88	Нет scheduled dark mode	Низкий
+---
+БЕЗОПАСНОСТЬ — ДОПОЛНИТЕЛЬНЫЕ (10 пунктов)
+#	Что не сделано
+89	localStorage без шифрования — все сообщения, контакты, настройки в plaintext
+90	Нет защиты от XSS — DOMPurify есть, но не везде применяется
+91	Нет CSP для production — только dev CSP
+92	Нет Subresource Integrity
+93	Нет Certificate Pinning для API вызовов
+94	Нет rate limiting на /api/messages
+95	Нет IP-based rate limiting
+96	Нет audit log действий пользователя
+97	Нет content-security-policy на relay-backend
+98	JWT в query param для WS — виден в логах
+---
+ПРОИЗВОДИТЕЛЬНОСТЬ (10 пунктов)
+#	Что не сделано	Приоритет
+99	Нет виртуализации списков — все сообщения рендерятся	Критический
+100	Mock-данные 650 строк загружаются всегда	Средний
+101	Нет memoization — AI_SUGGESTION_CHIPS пересоздаётся каждый рендер	Средний
+102	Нет debounce на поиске в некоторых местах	Средний
+103	Нет lazy loading изображений с blur placeholder	Средний
+104	Нет code splitting для тяжёлых компонентов	Средний
+105	Нет Web Worker для тяжёлых вычислений	Низкий
+106	Нет requestIdleCallback для некритичных задач	Низкий
+107	Нет compression на relay-backend (gzip/brotli)	Средний
+108	Нет кэширования API ответов	Средний
+---
+PWA / МОБИЛЬНОСТЬ (8 пунктов)
+#	Что не сделано	Приоритет
+109	Нет PWA manifest — приложение не устанавливаемо	Высокий
+110	Нет service worker — нет offline support	Высокий
+111	Нет push notifications	Высокий
+112	Нет haptic feedback на мобильных	Низкий
+113	Нет safe area insets для notched устройств (частично)	Средний
+114	Нет viewport meta оптимизации	Средний
+115	Нет splash screen	Низкий
+116	Нет app icon разных размеров	Низкий
+---
+## ИТОГО: ~116 ДОПОЛНИТЕЛЬНЫХ ПУНКТОВ
+### Общий счёт: **~358 пунктов** за весь аудит
+---
+КРИТИЧЕСКИЕ РЕШЕНИЯ, КОТОРЫЕ НУЖНО ПРИНЯТЬ
+# Questions
+Какая архитектура хранения данных тебе нужна? Все данные ТОЛЬКО локально на устройстве, или нужен сервер для P2P-связи?
+Полностью локальное (P2P)
+Как будет работать OpenClaw локально? Какая AI-модель будет использоваться для модерации?
+Все локально мой ии Presidium AI обученный на ключах GLM работает как ии агент облачный - но все остальное локальное по типу Signal messenger так как локальное хранение данных , для этого нужна полнай модерация на локальном OpenClaw который работает локально на устройстве + ключи API GLM - мой сервер лишь коммутатор для переадресации - а данные пользователей приходят на сервер зашифрованные и уходят так же зашифрованными
+Какой приоритет реализации? Что делать в первую очередь?
+Нужно все развернуто и планомерно , не торопиться и не сокращать если не будет хватать текстового окна - просто надо будет подождать моей модерации и прочтения - если все ок то мы так же продолжаем
+АРХИТЕКТУРА УТВЕРЖДЕНА
+Понял. Полная картина:
+------------------------------------------------------------------¬
+¦                     УСТРОЙСТВО ПОЛЬЗОВАТЕЛЯ                      ¦
+¦                                                                  ¦
+¦  ------------------------------------------------------------¬  ¦
+¦  ¦  IndexedDB (зашифрованные данные)                          ¦  ¦
+¦  ¦  +-- Сообщения, чаты, контакты, настройки                  ¦  ¦
+¦  ¦  +-- AI conversations, moderation logs                     ¦  ¦
+¦  ¦  L-- Marketplace, Library (локально)                       ¦  ¦
+¦  L------------------------------------------------------------  ¦
+¦                                                                  ¦
+¦  -------------------¬     -----------------------------------¬  ¦
+¦  ¦  OpenClaw LOCAL  ¦     ¦  Presidium AI (GLM cloud)        ¦  ¦
+¦  ¦  +-- 24/7 active ¦     ¦  +-- AI-ассистент (облачный)     ¦  ¦
+¦  ¦  +-- cannot off  ¦     ¦  +-- API ключи GLM               ¦  ¦
+¦  ¦  +-- text mod    ¦     ¦  L-- Только AI-чат функции       ¦  ¦
+¦  ¦  +-- image mod   ¦     L-----------------------------------  ¦
+¦  ¦  +-- file mod    ¦                                           ¦
+¦  ¦  +-- voice mod   ¦     -----------------------------------¬  ¦
+¦  ¦  +-- video mod   ¦     ¦  WebRTC P2P + E2EE               ¦  ¦
+¦  ¦  +-- incoming ?  ¦     ¦  +-- X3DH key exchange           ¦  ¦
+¦  ¦  L-- outgoing ?  ¦     ¦  +-- Double Ratchet              ¦  ¦
+¦  L-------------------     ¦  +-- Signal protocol             ¦  ¦
+¦                             L-----------------------------------  ¦
+L------------------------------T-------------------------------------
+                               ¦
+                    -----------Ў----------------------------------¬
+                    ¦        RELAY SERVER (чистый коммутатор)      ¦
+                    ¦                                             ¦
+                    ¦  +-- WebSocket signaling only               ¦
+                    ¦  +-- NO data storage                        ¦
+                    ¦  +-- NO message persistence                 ¦
+                    ¦  +-- Routes encrypted blobs only            ¦
+                    ¦  +-- Pre-key bundle distribution            ¦
+                    ¦  L-- Presence signaling                     ¦
+                    L----------------------------------------------
+---
+ДОПОЛНИТЕЛЬНЫЕ НЕДОЧЁТЫ С УЧЁТОМ АРХИТЕКТУРЫ
+OPENCLAW — ЛОКАЛЬНАЯ МОДЕРАЦИЯ (25 пунктов)
+#	Что не сделано
+1	Нет локального moderation engine — сейчас вызывает GLM-4 API
+2	Категория «бандитизм» отсутствует в VALID_CATEGORIES
+3	Категория «убийства» отсутствует в VALID_CATEGORIES
+4	Категория «криминал» — только fraud
+5	Нет модерации входящих сообщений
+6	Нет модерации изображений
+7	Нет модерации файлов
+8	Нет модерации голосовых
+9	Нет модерации видео
+10	Нет OCR для текста на изображениях
+11	Fail-open — при ошибке сообщение проходит
+12	Кнопка «Send Anyway» позволяет обойти
+13	Нет repeat offender tracking
+14	Нет auto-ban нарушителей
+15	Нет moderation log в IndexedDB
+16	Нет severity escalation
+17	Нет hash-базы запрещённого контента
+18	Нет pattern matching для текстов
+19	Нет контекстного анализа
+20	Нет rate limiting на moderation
+21	Нет fallback при нехватке ресурсов
+22	Нет индикатора работы OpenClaw
+23	Нет статистики модерации
+24	Нет обновления моделей
+25	Нет конфигурации порогов
+---
+ЛОКАЛЬНОЕ ХРАНЕНИЕ ДАННЫХ (20 пунктов)
+#	Что не сделано
+26	Нет IndexedDB — только localStorage (5-10 МБ лимит)
+27	Нет шифрования localStorage/IndexedDB
+28	Нет деривации ключа от PIN/пароля
+29	Нет схемы IndexedDB — нужны таблицы для messages, chats, contacts, etc.
+30	Нет QuotaExceededError handling
+31	Нет LRU eviction
+32	Нет сжатия данных перед записью
+33	Нет миграции схемы БД
+34	Нет бэкапа/восстановления
+35	Нет очистки мусора
+36	Нет индексации для поиска
+37	Нет пагинации при чтении из БД
+38	Нет transaction support
+39	Нет blob storage для медиа
+40	Нет cache management для изображений
+41	Нет data integrity checks
+42	Нет secure wipe
+43	Нет разделения по чатам в БД
+44	Нет TTL для сообщений
+45	Нет deduplication
+---
+E2EE / SIGNAL PROTOCOL (20 пунктов)
+#	Что не сделано
+46	Нет X3DH реализации
+47	Нет Double Ratchet
+48	Нет pre-key bundle generation на клиенте
+49	Нет identity key pair генерации
+50	Нет signed pre-key rotation
+51	Нет one-time pre-key management
+52	Нет session management
+53	Нет message encryption перед отправкой
+54	Нет message decryption при получении
+55	Нет safety number verification
+56	Нет key transparency
+57	Нет forward secrecy
+58	Нет post-compromise security
+59	Нет group E2EE
+60	Нет key backup
+61	Нет key revocation
+62	Нет device linking
+63	Нет fingerprint display
+64	Нет key change notification
+65	Нет crypto library
+---
+RELAY SERVER — ЧИСТЫЙ КОММУТАТОР (15 пунктов)
+#	Что не сделано
+66	Хранит 15 моделей данных — нужно удалить все
+67	Нет Message модели — и не нужна, сервер не хранит
+68	Нет pure signaling mode
+69	Нет pre-key bundle routing
+70	Нет presence routing
+71	Нет call signaling
+72	Нет rate limiting
+73	Нет connection auth
+74	Нет message validation
+75	Нет size limits
+76	Нет graceful shutdown
+77	Нет health check
+78	Нет logging
+79	Нет monitoring
+80	Нет horizontal scaling
+---
+P2P / WebRTC (15 пунктов)
+#	Что не сделано
+81	Нет WebRTC реализации
+82	Нет ICE candidate exchange
+83	Нет STUN/TURN конфигурации
+84	Нет data channel для сообщений
+85	Нет media stream для звонков
+86	Нет fallback на relay
+87	Нет connection management
+88	Нет reconnection logic
+89	Нет bandwidth estimation
+90	Нет adaptive quality
+91	Нет NAT type detection
+92	Нет TURN credentials
+93	Нет simulcast
+94	Нет SVC
+95	Нет echo cancellation
+---
+UI/UX — КРИТИЧЕСКИЕ (20 пунктов)
+#	Что не сделано
+96	Нет индикатора E2EE
+97	Нет safety number display
+98	Нет key change warning
+99	Нет verified contact badge
+100	Нет OpenClaw status indicator
+101	Нет moderation violation counter
+102	Нет blocked content indicator
+103	Нет incoming moderation banner
+104	Нет storage management UI
+105	Нет data export UI
+106	Нет data import UI
+107	Нет secure wipe UI
+108	Нет backup/restore UI
+109	Нет offline mode UI
+110	Нет sync status
+111	Нет connection quality UI
+112	Нет encryption setup wizard
+113	Нет PIN setup flow
+114	Нет biometric auth
+115	Нет app lock
+---
+API — УДАЛИТЬ / ПЕРЕДЕЛАТЬ (15 пунктов)
+#	Что сделать
+116	Удалить /api/messages
+117	Удалить /api/chats
+118	Удалить /api/contacts
+119	Удалить /api/users
+120	Удалить /api/upload
+121	Удалить /api/books/*
+122	Удалить /api/proxy/*
+123	Переделать /api/auth
+124	Удалить /api/ai-chat DB persistence
+125	Переделать /api/openclaw/moderate
+126	Создать /api/signaling
+127	Создать /api/keys
+128	Создать /api/presence
+129	Удалить Prisma main schema
+130	Удалить Prisma relay schema
+---
+БЕЗОПАСНОСТЬ — ДОПОЛНИТЕЛЬНЫЕ (10 пунктов)
+#	Что не сделано
+131	Нет secure enclave usage
+132	Нет anti-tampering
+133	Нет certificate pinning
+134	Нет secure random
+135	Нет memory scrubbing
+136	Нет secure clipboard
+137	Нет screenshot protection
+138	Нет jailbreak/root detection
+139	Нет anti-debugging
+140	Нет code obfuscation
+---
+## ОБЩИЙ СЧЁТ: ~140 ДОПОЛНИТЕЛЬНЫХ ПУНКТОВ
+## ГРАНД-ИТОГО: **~382 пункта**
+---
+ПЛАН РЕАЛИЗАЦИИ — ПОЭТАПНЫЙ
+ЭТАП 0: Фундамент локальной архитектуры (7-10 дней)
+0.1 IndexedDB слой
+- Создать src/lib/db/local-db.ts — обёртка над IndexedDB
+- Таблицы: messages, chats, contacts, users, settings, aiConversations, moderationLogs, mediaBlobs, keyStore
+- Миграции, транзакции, курсоры, индексы
+- Шифрование: AES-256-GCM через crypto.subtle
+- Деривация ключа: PBKDF2 от PIN пользователя
+- LRU eviction, сжатие LZ-string
+0.2 Удаление серверной БД
+- Удалить prisma/schema.prisma
+- Удалить mini-services/relay-backend/prisma/schema.prisma
+- Удалить все /api/* роуты кроме signaling
+- Удалить useApiStore, api-client.ts server calls
+0.3 Relay > чистый signaling
+- Переписать mini-services/relay-backend/src/index.ts
+- Оставить только: WebSocket routing encrypted blobs, pre-key distribution, presence signaling
+- Удалить: все HTTP CRUD endpoints, все модели данных
+- Добавить: rate limiting, health check, graceful shutdown
+---
+ЭТАП 1: E2EE — Signal Protocol (10-14 дней)
+1.1 Крипто-библиотека
+- Интегрировать libsodium (libsodium-wrappers) или @signalapp/libsignal-protocol-javascript
+- Генерация identity key pair (X25519 + Ed25519)
+- Pre-key bundle: 100 one-time pre-keys + 1 signed pre-key
+1.2 X3DH
+- Реализовать Extended Triple Diffie-Hellman
+- Pre-key bundle upload на relay
+- Pre-key bundle fetch для контакта
+- Shared secret derivation
+1.3 Double Ratchet
+- Реализовать Double Ratchet algorithm
+- Root key chain, sending/receiving chains
+- Message key derivation
+- Ratchet step on each message
+1.4 Message encryption/decryption
+- Шифрование каждого сообщения перед отправкой
+- Расшифровка при получении
+- Формат encrypted envelope: { type, ciphertext, iv, mac, ephemeralKey, counter }
+1.5 Group E2EE
+- Sender keys для групп
+- Group key distribution
+1.6 Safety numbers
+- Генерация fingerprint из identity keys
+- UI для сравнения safety numbers
+- Key change detection и notification
+---
+ЭТАП 2: OpenClaw — локальная модерация (10-14 дней)
+2.1 Локальный moderation engine
+- Создать src/lib/openclaw/local-moderator.ts
+- Категории: extremism, terrorism, fascism, drug_business, violence, pornography, fraud, banditism, murder, criminal_activity
+- Pattern matching (regex) для очевидных нарушений
+- Локальная AI модель для контекстного анализа (или GLM API для тяжёлого анализа)
+2.2 Модерация всех типов контента
+- Текст: прямой анализ
+- Изображения: локальная vision модель или hash-база
+- Файлы: извлечение текста + анализ
+- Голосовые: Web Speech API > текст > модерация
+- Видео: извлечение кадров > анализ изображений
+2.3 Fail-close
+- При ошибке модерации — БЛОКИРОВКА сообщения
+- Никакого «Send Anyway» для blocked
+- Advisory warnings можно обойти
+2.4 Incoming moderation
+- ВСЕ входящие сообщения проходят через OpenClaw
+- Заблокированные не отображаются
+- Предупреждения отображаются на спорных
+2.5 Repeat offender tracking
+- Счётчик нарушений в IndexedDB
+- Auto-ban после N нарушений
+- Escalation severity
+2.6 Moderation log
+- Лог всех проверок в IndexedDB
+- Статистика: проверено, заблокировано, предупреждено
+- UI панель статистики
+2.7 UI индикаторы
+- «OpenClaw Active» — всегда виден
+- Невозможно отключить
+- Статус-бар с счётчиками
+---
+ЭТАП 3: P2P / WebRTC (7-10 дней)
+3.1 WebRTC Data Channel
+- RTCPeerConnection для передачи сообщений
+- ICE candidate exchange через relay signaling
+- STUN/TURN конфигурация
+3.2 Media streams
+- getUserMedia для аудио/видео звонков
+- Media stream через peer connection
+- Echo cancellation, noise suppression
+3.3 Connection management
+- Auto-connect к контактам
+- Reconnection logic
+- Fallback на relay если P2P невозможен
+3.4 Call UI
+- Реальные звонки вместо мок-UI
+- Incoming call screen
+- Call quality indicator
+---
+ЭТАП 4: Авторизация и профиль (3-5 дней)
+4.1 Локальная авторизация
+- PIN-код для шифрования
+- Биометрия (если доступна)
+- App lock
+4.2 Профиль локально
+- Все данные профиля в IndexedDB
+- Avatar локально
+- Настройки локально
+4.3 E2EE setup wizard
+- Первоначальная генерация ключей
+- Показ safety numbers
+- Инструкция по безопасности
+---
+ЭТАП 5: Чаты — полный функционал (7-10 дней)
+5.1 Message pipeline
+- Отправка: текст > OpenClaw > шифрование > P2P
+- Получение: P2P > расшифровка > OpenClaw > рендер
+- Статусы: sending > sent > delivered > read
+5.2 Медиа
+- Emoji picker
+- Стикеры
+- GIF
+- Файлы (drag-and-drop, paste)
+- Голосовые (запись/воспроизведение)
+- Видео-кружки
+5.3 Взаимодействия
+- Редактирование сообщений
+- Удаление (у всех / у меня)
+- Ответ/цитирование
+- Пересылка
+- Реакции
+- Закрепление
+5.4 Поиск
+- Полнотекстовый поиск по IndexedDB
+- Поиск внутри чата
+- Фильтры по типу
+---
+ЭТАП 6: Feed / Marketplace / Library (5-7 дней)
+6.1 Feed локально
+- Посты в IndexedDB
+- P2P распространение
+- Лайки/комментарии локально
+6.2 Marketplace локально
+- Листинги в IndexedDB
+- P2P каталог
+- OpenClaw модерация листингов
+6.3 Library локально
+- Книги в IndexedDB
+- Reading progress локально
+- Book reader
+---
+ЭТАП 7: Presidium AI (GLM) (3-5 дней)
+7.1 AI-ассистент
+- Подключение к GLM API
+- AI-чат с conversation history
+- AI в чате (@ai mention)
+- Режимы: summarize, translate, reply, etc.
+7.2 SSE/streaming
+- Streaming ответов
+- Abort/cancel
+- Markdown rendering
+7.3 Rate limiting
+- Клиентский rate limit
+- Retry logic
+- Error handling
+---
+ЭТАП 8: Полировка и UX (5-7 дней)
+8.1 Виртуализация
+- react-window для списков
+- Infinite scroll
+- Pagination
+8.2 PWA
+- Manifest
+- Service worker
+- Push notifications
+- Install prompt
+8.3 Accessibility
+- ARIA labels
+- Keyboard navigation
+- Focus management
+- Screen reader support
+8.4 Производительность
+- Code splitting
+- Lazy loading
+- Memoization
+- Debounce
+8.5 UX детали
+- Loading states
+- Error states
+- Empty states
+- Success feedback
+- Confirmation dialogs
+- Undo actions
+- Tooltips
+- Micro-interactions
+---
+ЭТАП 9: Тестирование и безопасность (5-7 дней)
+9.1 E2EE аудит
+- Проверка X3DH реализации
+- Проверка Double Ratchet
+- Тесты на forward secrecy
+- Тесты на post-compromise security
+9.2 OpenClaw тесты
+- Тесты всех категорий модерации
+- Тесты fail-close
+- Тесты incoming moderation
+- Тесты всех типов контента
+9.3 Тесты производительности
+- Нагрузка на IndexedDB
+- P2P соединение при плохой сети
+- Память при долгих сессиях
+9.4 Security audit
+- XSS тесты
+- CSRF тесты
+- Injection тесты
+- Penetration testing

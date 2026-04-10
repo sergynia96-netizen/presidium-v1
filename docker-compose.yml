@@ -1,0 +1,185 @@
+# ============================================
+# PRESIDIUM - Production Docker Compose
+# ============================================
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose down           # Stop all services
+#   docker compose logs -f        # View logs
+#   docker compose build          # Rebuild images
+# ============================================
+
+services:
+  # ─── Next.js Application ──────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: production
+        NEXT_PUBLIC_RELAY_HTTP_URL: ${NEXT_PUBLIC_RELAY_HTTP_URL:-http://localhost:3001}
+        NEXT_PUBLIC_RELAY_WS_URL: ${NEXT_PUBLIC_RELAY_WS_URL:-ws://localhost:3001/ws}
+        NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${NEXT_PUBLIC_VAPID_PUBLIC_KEY:-}
+        NEXT_PUBLIC_STORAGE_QUOTA_MB: ${NEXT_PUBLIC_STORAGE_QUOTA_MB:-1024}
+    env_file:
+      - .env.local
+    container_name: presidium-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://presidium:${DB_PASSWORD:?Set DB_PASSWORD in .env.local}@db:5432/presidium?schema=public
+      - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:3000}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:?Set NEXTAUTH_SECRET in .env.local}
+      - AI_PROVIDER=${AI_PROVIDER:-glm4}
+      - GLM4_MODEL=${GLM4_MODEL:-glm-4.7-flash}
+      - ALLOW_ANON_AI=${ALLOW_ANON_AI:-true}
+      - NEXT_PUBLIC_RELAY_HTTP_URL=${NEXT_PUBLIC_RELAY_HTTP_URL:-http://localhost:3001}
+      - NEXT_PUBLIC_RELAY_WS_URL=${NEXT_PUBLIC_RELAY_WS_URL:-ws://localhost:3001/ws}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
+      - JWT_SECRET=${JWT_SECRET:?Set JWT_SECRET in .env.local}
+      - S3_ENDPOINT=${S3_ENDPOINT:-http://minio:9000}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:?Set S3_ACCESS_KEY in .env.local}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:?Set S3_SECRET_KEY in .env.local}
+      - S3_BUCKET=${S3_BUCKET:-presidium}
+    depends_on:
+      db:
+        condition: service_healthy
+      relay:
+        condition: service_started
+    networks:
+      - presidium-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://$${HOSTNAME}:3000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ─── Relay Backend ────────────────────────
+  relay:
+    build:
+      context: ./mini-services/relay-backend
+      dockerfile: Dockerfile
+    container_name: presidium-relay
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://presidium:${DB_PASSWORD:?Set DB_PASSWORD in .env.local}@db:5432/relay?schema=public
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.local}@redis:6379
+      - JWT_SECRET=${JWT_SECRET:?Set JWT_SECRET in .env.local}
+      - CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+      - PORT=3001
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - presidium-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ─── PostgreSQL Database ──────────────────
+  db:
+    image: postgres:15-alpine
+    container_name: presidium-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=presidium
+      - POSTGRES_PASSWORD=${DB_PASSWORD:?Set DB_PASSWORD in .env.local}
+      - POSTGRES_MULTIPLE_DATABASES=presidium,relay
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/init-multiple-databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh:ro
+    networks:
+      - presidium-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U presidium -d presidium"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ─── Redis (for relay sessions) ───────────
+  redis:
+    image: redis:7-alpine
+    container_name: presidium-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.local}
+    volumes:
+      - redisdata:/data
+    networks:
+      - presidium-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ─── MinIO (S3-compatible storage) ───────
+  minio:
+    image: minio/minio:latest
+    container_name: presidium-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-presidiumadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env.local}
+    command: server /data --console-address ":9001"
+    volumes:
+      - s3data:/data
+    networks:
+      - presidium-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ─── CoTURN (STUN/TURN server) ───────────
+  # Note: CoTURN requires host network mode for proper NAT traversal
+  # In production, consider running CoTURN as a separate service on the host
+  # coturn:
+  #   image: coturn/coturn:latest
+  #   container_name: presidium-coturn
+  #   restart: unless-stopped
+  #   network_mode: "host"
+  #   environment:
+  #     - TURN_USERNAME=presidium
+  #     - TURN_PASSWORD=${TURN_PASSWORD:-presidium_turn_pass}
+  #     - REALM=${YOUR_DOMAIN:-localhost}
+  #   command: >-
+  #     --log-file=stdout
+  #     --min-port=49152
+  #     --max-port=65535
+  #     --user=presidium:${TURN_PASSWORD:-presidium_turn_pass}
+  #     --realm=${YOUR_DOMAIN:-localhost}
+  #     --verbose
+
+# ─── Volumes ────────────────────────────────
+volumes:
+  pgdata:
+    driver: local
+  redisdata:
+    driver: local
+  s3data:
+    driver: local
+
+# ─── Networks ───────────────────────────────
+networks:
+  presidium-network:
+    driver: bridge

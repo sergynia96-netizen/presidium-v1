@@ -1,0 +1,412 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                   String             @id @default(cuid())
+  name                 String
+  email                String             @unique
+  passwordHash         String? // Hashed password for Credentials auth
+  avatar               String             @default("")
+  status               String             @default("offline")
+  pinEnabled           Boolean            @default(false)
+  pinHash              String? // Hashed PIN code
+  bio                  String?
+  username             String?            @unique
+  phone                String?
+  birthday             String?
+  emailVerified        DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  chatMembers          ChatMember[]
+  settings             UserSettings?
+  aiConversations      AIConversation[]
+  accounts             Account[]
+  sessions             Session[]
+  contacts             Contact[]          @relation("UserOwnContacts") // Contacts this user has added
+  contactOf            Contact[]          @relation("UserContacts")
+  sentMessages         Message[]          @relation("UserMessages")
+  feedPosts            FeedPost[]
+  feedComments         FeedComment[]
+  feedReactions        FeedReaction[]
+  stories              Story[]
+  storyViews           StoryView[]
+  storyRepliesSent     StoryReply[]       @relation("StoryReplyFrom")
+  storyRepliesReceived StoryReply[]       @relation("StoryReplyTo")
+  pushSubscriptions    PushSubscription[]
+  bots                 Bot[]
+  apiKeys              ApiKey[]
+  webhooks             Webhook[]
+
+  @@index([email])
+  @@index([username])
+}
+
+model Bot {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  prompt      String
+  avatarUrl   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([name])
+}
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String
+  key         String    @unique // hashed key
+  permissions String // JSON string, e.g. ["messages:write"]
+  lastUsed    DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+}
+
+model Webhook {
+  id        String   @id @default(cuid())
+  userId    String
+  url       String
+  events    String // JSON string array
+  secret    String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([enabled])
+}
+
+// NextAuth.js Account model
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+// NextAuth.js Session model
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// NextAuth.js Verification Token model
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model ChatMember {
+  id       String   @id @default(cuid())
+  userId   String
+  chatId   String
+  role     String   @default("member")
+  joinedAt DateTime @default(now())
+  user     User     @relation(fields: [userId], references: [id])
+  chat     Chat     @relation(fields: [chatId], references: [id])
+
+  @@index([userId])
+  @@index([chatId])
+}
+
+model Chat {
+  id              String       @id @default(cuid())
+  type            String       @default("private")
+  name            String
+  avatar          String       @default("")
+  lastMessage     String       @default("")
+  lastMessageTime String       @default("")
+  unreadCount     Int          @default(0)
+  isPinned        Boolean      @default(false)
+  isMuted         Boolean      @default(false)
+  isEncrypted     Boolean      @default(false)
+  encryptionType  String?
+  members         ChatMember[]
+  messages        Message[]
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+}
+
+model Message {
+  id                      String   @id @default(cuid())
+  chatId                  String
+  senderId                String
+  senderName              String   @default("")
+  senderAvatar            String   @default("")
+  content                 String
+  type                    String   @default("text")
+  status                  String   @default("sent")
+  isMe                    Boolean  @default(false)
+  mediaUrl                String?
+  mediaType               String?
+  mediaName               String?
+  mediaSize               Int?
+  mediaMimeType           String?
+  isPinned                Boolean  @default(false)
+  isEdited                Boolean  @default(false)
+  replyToMessageId        String?
+  replyToSenderName       String?
+  replyToContent          String?
+  replyToType             String?
+  forwardedFromMessageId  String?
+  forwardedFromSenderName String?
+  forwardedFromContent    String?
+  forwardedFromType       String?
+  forwardedFromChatName   String?
+  chat                    Chat     @relation(fields: [chatId], references: [id])
+  sender                  User     @relation("UserMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@index([chatId])
+  @@index([senderId])
+}
+
+model UserSettings {
+  id                  String  @id @default(cuid())
+  userId              String  @unique
+  desktopNotif        Boolean @default(true)
+  taskbarAnim         Boolean @default(false)
+  notifPrivate        Boolean @default(true)
+  notifChannels       Boolean @default(true)
+  notifGroups         Boolean @default(true)
+  notifNewUser        Boolean @default(false)
+  notifPinned         Boolean @default(false)
+  notifCalls          Boolean @default(true)
+  notifPreview        Boolean @default(true)
+  notifVibration      Boolean @default(true)
+  notifMutedAll       Boolean @default(false)
+  sound               Boolean @default(true)
+  autoDelete          String  @default("Off")
+  readReceipts        Boolean @default(true)
+  typingIndicators    Boolean @default(true)
+  onlineStatus        Boolean @default(true)
+  privacyLastSeen     String  @default("contacts")
+  privacyProfilePhoto String  @default("contacts")
+  privacyAbout        String  @default("everyone")
+  privacyGroupAdds    String  @default("contacts")
+  privacyCallFrom     String  @default("everyone")
+  openClawEnabled     Boolean @default(true)
+  locale              String  @default("en")
+  accentColor         String  @default("emerald")
+  twoFactorEnabled    Boolean @default(false)
+  twoFactorSecret     String?
+  user                User    @relation(fields: [userId], references: [id])
+}
+
+// Contact model for user contacts/favorites
+model Contact {
+  id         String   @id @default(cuid())
+  userId     String // User who owns this contact list
+  contactId  String // The contacted user
+  name       String? // Custom name for this contact
+  isFavorite Boolean  @default(false)
+  isBlocked  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation("UserOwnContacts", fields: [userId], references: [id], onDelete: Cascade)
+  contact    User     @relation("UserContacts", fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, contactId])
+  @@index([userId])
+  @@index([contactId])
+}
+
+// AI Conversation models
+model AIConversation {
+  id          String                  @id @default(cuid())
+  userId      String
+  title       String
+  mode        String                  @default("default")
+  lastMessage String
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  user        User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages    AIConversationMessage[]
+
+  @@index([userId])
+  @@index([mode])
+}
+
+model AIConversationMessage {
+  id             String         @id @default(cuid())
+  conversationId String
+  role           String // 'user' | 'assistant'
+  content        String
+  timestamp      String
+  conversation   AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([timestamp])
+}
+
+model FeedPost {
+  id          String   @id @default(cuid())
+  authorId    String
+  title       String
+  content     String
+  likes       Int      @default(0)
+  dislikes    Int      @default(0)
+  comments    Int      @default(0)
+  repostCount Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  author       User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  commentsList FeedComment[]
+  reactions    FeedReaction[]
+
+  @@index([authorId, createdAt])
+  @@index([createdAt])
+}
+
+model FeedComment {
+  id        String   @id @default(cuid())
+  postId    String
+  authorId  String
+  content   String
+  likes     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  post   FeedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([postId, createdAt])
+  @@index([authorId, createdAt])
+}
+
+model FeedReaction {
+  id        String   @id @default(cuid())
+  postId    String
+  userId    String
+  type      String // like | dislike | repost
+  createdAt DateTime @default(now())
+
+  post FeedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId, type])
+  @@index([postId, type])
+  @@index([userId, createdAt])
+}
+
+model Story {
+  id             String    @id @default(cuid())
+  sourceId       String
+  sourceType     String
+  creatorId      String
+  creatorName    String
+  creatorAvatar  String?
+  type           String
+  content        String
+  mediaUrl       String?
+  mediaMimeType  String?
+  mediaName      String?
+  mediaSize      Int?
+  e2eKey         String?
+  e2eIv          String?
+  e2eTag         String?
+  thumbnail      String?
+  privacy        String
+  allowedUserIds String?
+  views          Int       @default(0)
+  replyCount     Int       @default(0)
+  createdAt      DateTime  @default(now())
+  expiresAt      DateTime
+  deletedAt      DateTime?
+
+  creator     User         @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  viewEntries StoryView[]
+  replies     StoryReply[]
+
+  @@index([sourceType, sourceId, createdAt])
+  @@index([creatorId, createdAt])
+  @@index([expiresAt])
+}
+
+model StoryView {
+  id       String   @id @default(cuid())
+  storyId  String
+  userId   String
+  viewedAt DateTime @default(now())
+
+  story Story @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([storyId, userId])
+  @@index([userId, viewedAt])
+}
+
+model StoryReply {
+  id         String   @id @default(cuid())
+  storyId    String
+  fromUserId String
+  toUserId   String
+  content    String
+  messageId  String?
+  createdAt  DateTime @default(now())
+
+  story    Story @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  fromUser User  @relation("StoryReplyFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser   User  @relation("StoryReplyTo", fields: [toUserId], references: [id], onDelete: Cascade)
+
+  @@index([storyId, createdAt])
+  @@index([fromUserId, createdAt])
+  @@index([toUserId, createdAt])
+}
+
+model PushSubscription {
+  id             String   @id @default(cuid())
+  userId         String
+  endpoint       String   @unique
+  p256dh         String
+  auth           String
+  expirationTime String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}

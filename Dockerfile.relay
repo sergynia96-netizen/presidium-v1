@@ -1,0 +1,29 @@
+FROM oven/bun:latest AS builder
+WORKDIR /app
+
+# Copy dependency files
+COPY mini-services/relay-backend/package.json mini-services/relay-backend/bun.lock* ./
+RUN bun install --frozen-lockfile || bun install
+
+# Copy source code and Prisma schema
+COPY mini-services/relay-backend/prisma ./prisma
+COPY mini-services/relay-backend/src ./src
+
+# Generate prisma client
+RUN bunx prisma generate
+
+FROM oven/bun:latest AS runner
+WORKDIR /app
+
+# Copy production dependencies and generated client
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/src ./src
+
+# Create SQLite data directory explicitly
+RUN mkdir -p /app/data
+ENV DATABASE_URL=file:/app/data/relay.db
+
+# Before starting, push prisma schema to make sure the db is created and schema is up to date
+EXPOSE 3001
+CMD ["sh", "-c", "bunx prisma db push && bun src/index.ts"]

@@ -1,0 +1,337 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Account ───────────────────────────────────────
+// Stores ONLY routing metadata. NEVER message content.
+
+model Account {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String   // argon2id
+  displayName   String
+  username      String?  @unique
+  publicKey     String   // Ed25519 identity key (hex)
+  status        String   @default("offline") // online | away | offline
+  lastSeen      DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  devices       Device[]
+  preKeys       PreKeyBundle[]
+  sessions      Session[]
+  contactsFrom  Contact[] @relation("ContactOwner")
+  contactsTo    Contact[] @relation("ContactTarget")
+  groupMembers  GroupMember[]
+  channelSubs   ChannelSubscriber[]
+  otpCodes      OtpCode[]
+  listings      MarketplaceItem[]
+  searchQueries SearchQuery[]
+  favorites     Favorite[]
+  transactionsBuyer Transaction[] @relation("Buyer")
+  transactionsSeller Transaction[] @relation("Seller")
+  readingProgress    ReadingProgress[]
+  moderationReports  ModerationReport[]
+
+  @@map("accounts")
+}
+
+// ─── Device ────────────────────────────────────────
+
+model Device {
+  id            String   @id @default(uuid())
+  accountId     String
+  name          String
+  lastActive    DateTime @default(now())
+  account       Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("devices")
+}
+
+// ─── Session (JWT tokens) ──────────────────────────
+
+model Session {
+  id            String   @id @default(uuid())
+  accountId     String
+  tokenHash     String   @unique  // hashed JWT for lookup
+  deviceInfo    String?
+  ip            String?
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+  account       Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+// ─── Pre-Key Bundle (Signal X3DH) ─────────────────
+
+model PreKeyBundle {
+  id            String   @id @default(uuid())
+  accountId     String
+  preKeyId      Int
+  publicKey     String
+  signature     String?  // Only for signed pre-key (preKeyId = 0)
+  isUsed        Boolean  @default(false)
+  account       Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, preKeyId])
+  @@map("pre_key_bundles")
+}
+
+// ─── OTP (email verification) ─────────────────────
+
+model OtpCode {
+  id            String   @id @default(uuid())
+  accountId     String
+  code          String   // 6-digit
+  purpose       String   @default("verify_email") // verify_email | reset_password
+  expiresAt     DateTime
+  used          Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  account       Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("otp_codes")
+}
+
+// ─── Contact ───────────────────────────────────────
+
+model Contact {
+  id            String   @id @default(uuid())
+  ownerId       String   // who added this contact
+  contactId     String   // who was added
+  nickname      String?
+  blocked       Boolean  @default(false)
+  muted         Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  owner         Account  @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  target        Account  @relation("ContactTarget", fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, contactId])
+  @@map("contacts")
+}
+
+// ─── Group ─────────────────────────────────────────
+
+model Group {
+  id            String   @id @default(uuid())
+  name          String
+  createdBy      String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  members       GroupMember[]
+
+  @@map("groups")
+}
+
+model GroupMember {
+  id            String   @id @default(uuid())
+  groupId       String
+  accountId     String
+  role          String   @default("member") // admin | member
+  joinedAt      DateTime @default(now())
+
+  group         Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  account       Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, accountId])
+  @@map("group_members")
+}
+
+// ─── Channel ───────────────────────────────────────
+
+model Channel {
+  id            String   @id @default(uuid())
+  name          String
+  description   String?
+  isPublic      Boolean  @default(false)
+  createdBy      String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  subscribers   ChannelSubscriber[]
+
+  @@map("channels")
+}
+
+model ChannelSubscriber {
+  id            String   @id @default(uuid())
+  channelId     String
+  accountId     String
+  createdAt     DateTime @default(now())
+
+  channel       Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  account       Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, accountId])
+  @@map("channel_subscribers")
+}
+
+// ─── Marketplace ──────────────────────────────
+
+model MarketplaceItem {
+  id                   String   @id @default(uuid())
+  sellerId             String
+  sellerName           String
+  title                String
+  description          String
+  price                Float
+  maxPrice             Float    @default(200)
+  category             String   @default("Electronics")
+  condition            String   @default("used")
+  status               String   @default("available")
+  imageUrl             String?
+  views                Int      @default(0)
+  favorites            Int      @default(0)
+  identificationNumber String?  @unique
+  originalPrice        Float?
+  resaleCount          Int      @default(0)
+  lastResalePrice      Float?
+  isResale             Boolean  @default(false)
+  previousItemId       String?
+  previousOwnerIds     String   @default("[]")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  seller          Account       @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  favoriteEntries Favorite[]
+  transactions    Transaction[]
+
+  @@map("marketplace_items")
+}
+
+// ─── Transaction (anti-speculation tracking) ──
+
+model Transaction {
+  id                   String   @id @default(uuid())
+  itemId               String
+  buyerId              String
+  sellerId             String
+  price                Float
+  marketPrice          Float
+  category             String
+  identificationNumber String?
+  isResale             Boolean  @default(false)
+  resalePenalty        Float    @default(0)
+  priceDeviation       Float
+  dropshipFlag         Boolean  @default(false)
+  createdAt            DateTime @default(now())
+
+  item   MarketplaceItem @relation(fields: [itemId], references: [id])
+  buyer  Account         @relation("Buyer", fields: [buyerId], references: [id])
+  seller Account         @relation("Seller", fields: [sellerId], references: [id])
+
+  @@map("transactions")
+}
+
+// ─── Favorite ──────────────────────────────────
+
+model Favorite {
+  id        String   @id @default(uuid())
+  accountId String
+  itemId    String
+  createdAt DateTime @default(now())
+
+  account Account         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  item    MarketplaceItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, itemId])
+  @@map("favorites")
+}
+
+// ─── Search Queries (tracked for OpenClaw recommendations) ──
+
+model SearchQuery {
+  id           String   @id @default(uuid())
+  accountId    String
+  query        String
+  resultsCount Int      @default(0)
+  category     String?
+  createdAt    DateTime @default(now())
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("search_queries")
+}
+
+// ─── OpenClaw Moderation Reports ─────────────
+
+model ModerationReport {
+  id          String   @id @default(uuid())
+  accountId   String
+  targetId    String?
+  contextType String   // message | group | channel | marketplace | profile | other
+  category    String   // extremism | terrorism | ...
+  severity    String   // low | medium | high
+  reason      String
+  metadata    String?  // JSON string with redacted details
+  createdAt   DateTime @default(now())
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, createdAt])
+  @@index([category, createdAt])
+  @@map("moderation_reports")
+}
+
+// ─── Books Library ──────────────────────────
+
+model Book {
+  id            String   @id @default(uuid())
+  title         String
+  author        String
+  description   String?
+  coverUrl      String?
+  language      String   @default("en")
+  category      String   @default("Fiction")
+  totalChapters Int      @default(1)
+  totalWords    Int      @default(0)
+  content       String
+  isPublic      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  readingProgress ReadingProgress[]
+
+  @@map("books")
+}
+
+model ReadingProgress {
+  id             String   @id @default(uuid())
+  accountId      String
+  bookId         String
+  currentChapter Int      @default(1)
+  scrollPosition Float    @default(0)
+  percentage     Float    @default(0)
+  lastRead       DateTime @default(now())
+  bookmarks      String   @default("[]")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  book    Book    @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, bookId])
+  @@map("reading_progress")
+}
+
+// ─── Relay Offline Queue ─────────────────────
+// Temporarily stores encrypted E2E envelopes for offline recipients.
+
+model OfflineMessage {
+  id               String   @id @default(uuid())
+  fromId           String
+  toId             String
+  envelope         String   // Stringified RelayEnvelope (server never decrypts)
+  queuedAt         DateTime @default(now())
+  expiresAt        DateTime
+  deliveryAttempts Int      @default(0)
+
+  @@index([toId])
+  @@index([expiresAt])
+  @@map("offline_messages")
+}

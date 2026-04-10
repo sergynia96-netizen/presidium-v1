@@ -1,0 +1,30 @@
+{
+  "name": "presidium-relay-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot src/index.ts",
+    "start": "bun src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.2",
+    "argon2": "^0.41.1",
+    "cors": "^2.8.5",
+    "ioredis": "^5.10.1",
+    "jsonwebtoken": "^9.0.2",
+    "nanoid": "^5.1.5",
+    "ws": "^8.18.2"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.9",
+    "@types/cors": "^2.8.17",
+    "@types/jsonwebtoken": "^9.0.9",
+    "@types/ws": "^8.18.1",
+    "prisma": "^6.19.2",
+    "typescript": "^5.9.3"
+  }
+}

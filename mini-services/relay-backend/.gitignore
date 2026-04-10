@@ -1,0 +1,6 @@
+node_modules/
+backend.log
+*.log
+prisma/*.db
+prisma/*.db-journal
+
