@@ -106,19 +106,19 @@ export function getAllSessions(): Map<string, E2ESession> {
 
 // ─── Identity Key Management ─────────────────────────────────────────────────
 
-export async function getOrCreateIdentityKeys(): Promise<IdentityKeyPair> {
-  const stored = await getPreKeyBundle('identity');
+export async function getOrCreateIdentityKeys(password?: string): Promise<IdentityKeyPair> {
+  const stored = await getPreKeyBundle('identity', password);
   if (stored) {
     return deserializeIdentityKeyPair(stored as StoredIdentityKeys);
   }
 
   const keys = await generateIdentityKeyPair();
-  await uploadPreKeyBundle('identity', serializeIdentityKeyPair(keys));
+  await uploadPreKeyBundle('identity', serializeIdentityKeyPair(keys), password);
   return keys;
 }
 
-export async function getOrCreatePreKeys(): Promise<LocalPreKeyBundle> {
-  const identityKeys = await getOrCreateIdentityKeys();
+export async function getOrCreatePreKeys(password?: string): Promise<LocalPreKeyBundle> {
+  const identityKeys = await getOrCreateIdentityKeys(password);
 
   // Always regenerate pre-keys on startup to ensure we have private keys
   // (stored bundles only contain public keys)

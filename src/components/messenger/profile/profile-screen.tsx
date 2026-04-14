@@ -143,11 +143,26 @@ function SettingsRow({
   onClick?: () => void;
   badge?: string;
 }) {
+  const isInteractive = typeof onClick === 'function';
+
   return (
-    <button
-      type="button"
-      className="flex items-center gap-3 w-full py-3 px-1 text-left hover:bg-accent/30 rounded-lg transition-colors"
+    <div
+      role={isInteractive ? 'button' : undefined}
+      tabIndex={isInteractive ? 0 : undefined}
+      className={cn(
+        'flex items-center gap-3 w-full py-3 px-1 text-left rounded-lg transition-colors',
+        isInteractive
+          ? 'hover:bg-accent/30 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+          : undefined
+      )}
       onClick={onClick}
+      onKeyDown={(event) => {
+        if (!isInteractive) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onClick();
+        }
+      }}
     >
       <Icon className="size-4 text-muted-foreground shrink-0" />
       <span className="text-sm flex-1">{label}</span>
@@ -157,7 +172,7 @@ function SettingsRow({
         </Badge>
       )}
       {children}
-    </button>
+    </div>
   );
 }
 
@@ -658,6 +673,12 @@ export default function ProfileScreen() {
             <div className="text-center">
               <h2 className="text-xl font-bold">{user?.name || 'Alex Morgan'}</h2>
               <p className="text-sm text-muted-foreground mt-0.5">{user?.email || 'alex@presidium.app'}</p>
+              {user?.username && (
+                <p className="text-xs text-muted-foreground mt-1">@{user.username.replace(/^@+/, '')}</p>
+              )}
+              {user?.phone && (
+                <p className="text-xs text-muted-foreground mt-0.5">{user.phone}</p>
+              )}
               <Badge
                 variant="secondary"
                 className="mt-2 text-xs gap-1.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-0"

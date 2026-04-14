@@ -7,6 +7,16 @@ export function getRelayAccessToken(): string | null {
   );
 }
 
+export function setRelayAccessToken(token: string): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem('presidium_access_token', token);
+}
+
+export function clearRelayAccessToken(): void {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem('presidium_access_token');
+}
+
 export function getRelayAuthHeaders(
   base: Record<string, string> = {},
 ): Record<string, string> {

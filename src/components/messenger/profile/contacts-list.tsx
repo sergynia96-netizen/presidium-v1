@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
   ArrowLeft,
@@ -16,6 +16,8 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { useAppStore } from '@/store/use-app-store';
+import { useApiStore } from '@/store/use-api-store';
+import { chatsApi } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
 
@@ -50,7 +52,8 @@ const statusColors = {
 };
 
 export default function ContactsScreen() {
-  const { goBack, contacts, setView } = useAppStore();
+  const { goBack, contacts, setView, setActiveChat } = useAppStore();
+  const syncChats = useApiStore((s) => s.syncChats);
   const { t } = useT();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -94,9 +97,36 @@ export default function ContactsScreen() {
     return avatarColors[(idx % avatarColors.length + avatarColors.length) % avatarColors.length];
   };
 
-  const handleContactClick = (_contactId: string) => {
-    setView('contact-profile');
-  };
+  const handleContactClick = useCallback(
+    async (contactId: string, contactName: string) => {
+      try {
+        const response = await chatsApi.create({
+          name: contactName,
+          type: 'private',
+          memberIds: [contactId],
+          isEncrypted: true,
+          encryptionType: 'e2e',
+        });
+
+        const chatId =
+          (response as { chat?: { id?: string } }).chat?.id ||
+          (response as { data?: { chat?: { id?: string } } }).data?.chat?.id ||
+          null;
+
+        await syncChats();
+        if (chatId) {
+          setActiveChat(chatId);
+          setView('chat');
+          return;
+        }
+      } catch {
+        // Fallback to profile card if chat bootstrap fails.
+      }
+
+      setView('contact-profile');
+    },
+    [setActiveChat, setView, syncChats],
+  );
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -163,7 +193,7 @@ export default function ContactsScreen() {
                       className={cn(
                         'flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-colors hover:bg-accent/40'
                       )}
-                      onClick={() => handleContactClick(contact.id)}
+                      onClick={() => void handleContactClick(contact.id, contact.name)}
                     >
                       <div className="relative shrink-0">
                         <Avatar className="size-11">
@@ -218,7 +248,7 @@ export default function ContactsScreen() {
                   className={cn(
                     'flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-colors hover:bg-accent/40'
                   )}
-                  onClick={() => handleContactClick(contact.id)}
+                  onClick={() => void handleContactClick(contact.id, contact.name)}
                 >
                   <div className="relative shrink-0">
                     <Avatar className="size-11">

@@ -42,6 +42,7 @@ import type { TranslationKey } from '@/lib/i18n';
 import type { OutboxMessageIndicator } from '@/lib/message-outbox';
 import { useAppStore } from '@/store/use-app-store';
 import { OpenClawWarning } from './openclaw-warning';
+import { EncryptedImage, EncryptedVideo } from '@/components/messenger/media-fallback';
 
 // ─── OpenClaw moderation banner (reads from store) ───
 function OpenClawModerationBanner({ messageId }: { messageId: string }) {
@@ -211,6 +212,7 @@ export function MessageBubble({
   );
   const isAudioAttachment = Boolean(displayMediaUrl && (message.mediaType === 'audio' || message.type === 'voice'));
   const hasKnownAttachmentRenderer = isImageAttachment || isVideoAttachment || isFileAttachment || isAudioAttachment;
+  const isBlobMediaUrl = Boolean(displayMediaUrl?.startsWith('blob:'));
   const isDeleted = Boolean(message.isDeleted);
   const editCount = message.editHistory?.length || 0;
   const getReplyPreviewText = (value: Message) => {
@@ -405,31 +407,48 @@ export function MessageBubble({
           )}
 
           {!isDeleted && isImageAttachment && (
-            <a href={displayMediaUrl} target="_blank" rel="noreferrer" className="mb-2 block">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+            isBlobMediaUrl ? (
+              <a href={displayMediaUrl} target="_blank" rel="noreferrer" className="mb-2 block">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={displayMediaUrl}
+                  alt={message.mediaName || t('common.image')}
+                  className="max-h-72 w-full rounded-xl object-cover"
+                />
+              </a>
+            ) : (
+              <EncryptedImage
                 src={displayMediaUrl}
                 alt={message.mediaName || t('common.image')}
-                className="max-h-72 w-full rounded-xl object-cover"
+                className="mb-2 max-h-72 w-full rounded-xl object-cover"
+                fallbackClassName="mb-2 flex min-h-[120px] flex-col items-center justify-center rounded-xl border border-border/70 bg-background/70 p-4 text-sm text-muted-foreground"
               />
-            </a>
+            )
           )}
 
           {!isDeleted && isVideoAttachment && (
-              <div className="mb-2 overflow-hidden rounded-xl border border-border/70 bg-background/70">
+            <div className="mb-2 overflow-hidden rounded-xl border border-border/70 bg-background/70">
+              {isBlobMediaUrl ? (
                 <video
                   controls
                   preload="metadata"
                   src={displayMediaUrl}
                   className="max-h-80 w-full"
                 />
-                <div className="px-3 py-2">
-                  <p className="truncate text-xs font-semibold">{message.mediaName || t('common.attachment')}</p>
-                  <p className="text-[10px] text-muted-foreground">
-                    {[message.mediaMimeType, formatFileSize(message.mediaSize)].filter(Boolean).join(' · ')}
-                  </p>
-                </div>
+              ) : (
+                <EncryptedVideo
+                  src={displayMediaUrl}
+                  className="max-h-80 w-full"
+                  controls
+                />
+              )}
+              <div className="px-3 py-2">
+                <p className="truncate text-xs font-semibold">{message.mediaName || t('common.attachment')}</p>
+                <p className="text-[10px] text-muted-foreground">
+                  {[message.mediaMimeType, formatFileSize(message.mediaSize)].filter(Boolean).join(' · ')}
+                </p>
               </div>
+            </div>
             )}
 
           {!isDeleted && isFileAttachment && (

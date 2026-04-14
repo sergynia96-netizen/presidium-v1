@@ -5,11 +5,34 @@ import { db } from '@/lib/db';
 import { rateLimit } from '@/lib/rate-limit';
 import { z } from 'zod';
 
-const createContactSchema = z.object({
-  contactId: z.string().cuid(),
-  name: z.string().optional(),
-  isFavorite: z.boolean().optional().default(false),
-});
+const createContactSchema = z
+  .object({
+    contactId: z.string().cuid().optional(),
+    username: z.string().trim().min(1).optional(),
+    email: z.string().email().optional(),
+    phone: z.string().trim().min(3).optional(),
+    query: z.string().trim().min(1).optional(),
+    name: z.string().optional(),
+    isFavorite: z.boolean().optional().default(false),
+  })
+  .refine(
+    (value) =>
+      Boolean(
+        value.contactId ||
+          value.username ||
+          value.email ||
+          value.phone ||
+          value.query,
+      ),
+    {
+      message: 'At least one identifier is required',
+      path: ['contactId'],
+    },
+  );
+
+function normalizePhone(value: string): string {
+  return value.replace(/\D/g, '');
+}
 
 /**
  * GET /api/contacts - List user's contacts
@@ -38,11 +61,20 @@ export async function GET(request: NextRequest) {
     }
 
     if (search) {
+      const normalizedSearch = search.trim();
+      const normalizedUsername = normalizedSearch.replace(/^@+/, '');
       where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { contact: { name: { contains: search, mode: 'insensitive' } } },
-        { contact: { email: { contains: search, mode: 'insensitive' } } },
+        { name: { contains: normalizedSearch } },
+        { contact: { name: { contains: normalizedSearch } } },
+        { contact: { email: { contains: normalizedSearch } } },
+        { contact: { username: { contains: normalizedSearch } } },
       ];
+
+      if (normalizedUsername && normalizedUsername !== normalizedSearch) {
+        (where.OR as Array<Record<string, unknown>>).push({
+          contact: { username: { contains: normalizedUsername } },
+        });
+      }
     }
 
     const contacts = await db.contact.findMany({
@@ -56,6 +88,7 @@ export async function GET(request: NextRequest) {
             avatar: true,
             status: true,
             username: true,
+            phone: true,
           },
         },
       },
@@ -79,6 +112,7 @@ export async function GET(request: NextRequest) {
           avatar: c.contact.avatar,
           status: c.contact.status,
           username: c.contact.username,
+          phone: c.contact.phone,
           displayName: c.name || c.contact.name,
         },
         createdAt: c.createdAt,
@@ -128,7 +162,125 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { contactId, name, isFavorite } = parseResult.data;
+    const { name, isFavorite, contactId: rawContactId, username, email, phone, query } = parseResult.data;
+    const normalizedUsername = username?.replace(/^@+/, '').trim().toLowerCase();
+    const normalizedEmail = email?.trim().toLowerCase();
+    const normalizedPhone = phone ? normalizePhone(phone) : '';
+    const normalizedQuery = query?.trim();
+
+    let contactId = rawContactId;
+
+    if (!contactId) {
+      let contactUser = null as
+        | {
+            id: string;
+            email: string;
+            name: string;
+            username: string | null;
+            phone: string | null;
+          }
+        | null;
+
+      if (normalizedUsername) {
+        const usernameCandidates = await db.user.findMany({
+          where: {
+            id: { not: session.user.id },
+            username: { not: null },
+          },
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            username: true,
+            phone: true,
+          },
+          take: 200,
+        });
+        contactUser =
+          usernameCandidates.find(
+            (candidate) => (candidate.username || '').toLowerCase() === normalizedUsername,
+          ) || null;
+      }
+
+      if (!contactUser && normalizedEmail) {
+        const emailCandidates = await db.user.findMany({
+          where: {
+            id: { not: session.user.id },
+            email: { not: '' },
+          },
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            username: true,
+            phone: true,
+          },
+          take: 200,
+        });
+        contactUser =
+          emailCandidates.find(
+            (candidate) => candidate.email.toLowerCase() === normalizedEmail,
+          ) || null;
+      }
+
+      if (!contactUser && normalizedPhone) {
+        const phoneCandidates = await db.user.findMany({
+          where: {
+            id: { not: session.user.id },
+            phone: { not: null },
+          },
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            username: true,
+            phone: true,
+          },
+          take: 100,
+        });
+
+        contactUser =
+          phoneCandidates.find((candidate) => normalizePhone(candidate.phone || '') === normalizedPhone) ||
+          null;
+      }
+
+      if (!contactUser && normalizedQuery) {
+        contactUser = await db.user.findFirst({
+          where: {
+            id: { not: session.user.id },
+            OR: [
+              { name: { contains: normalizedQuery } },
+              { email: { contains: normalizedQuery } },
+              { username: { contains: normalizedQuery } },
+              { phone: { contains: normalizedQuery } },
+            ],
+          },
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            username: true,
+            phone: true,
+          },
+        });
+      }
+
+      if (!contactUser) {
+        return NextResponse.json(
+          { error: 'User not found' },
+          { status: 404 },
+        );
+      }
+
+      contactId = contactUser.id;
+    }
+
+    if (!contactId) {
+      return NextResponse.json(
+        { error: 'Contact target is required' },
+        { status: 400 },
+      );
+    }
 
     // Cannot add yourself as a contact
     if (contactId === session.user.id) {
@@ -184,6 +336,7 @@ export async function POST(request: NextRequest) {
             avatar: true,
             status: true,
             username: true,
+            phone: true,
           },
         },
       },
@@ -205,6 +358,7 @@ export async function POST(request: NextRequest) {
             avatar: contact.contact.avatar,
             status: contact.contact.status,
             username: contact.contact.username,
+            phone: contact.contact.phone,
             displayName: contact.name || contact.contact.name,
           },
           createdAt: contact.createdAt,

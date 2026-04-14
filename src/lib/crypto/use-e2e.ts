@@ -23,6 +23,7 @@ import { generateSafetyNumbers, compareSafetyNumbers } from './fingerprint';
 import { getShortFingerprint } from './identity';
 import { getContact } from './store';
 import { hexToBytes } from './utils';
+import { KeyVault } from './vault';
 import type { EncryptedEnvelope, DecryptedMessage } from './encrypt';
 import type { SafetyNumber, VerificationResult } from './fingerprint';
 import type { RelayEvent } from './relay-client';
@@ -72,8 +73,10 @@ export function useE2E(): UseE2EReturn {
 
     async function initialize() {
       try {
+        const vaultPassword = KeyVault.getVaultPassword() || undefined;
+
         // Initialize session manager
-        await sessionManager.initialize();
+        await sessionManager.initialize(vaultPassword);
 
         // Connect to relay
         await relayClient.connect();

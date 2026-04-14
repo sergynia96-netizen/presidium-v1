@@ -239,7 +239,9 @@ export const useApiStore = create<ApiState>((set, get) => ({
     
     try {
       const response = await contactsApi.list();
-      const contacts = response.data?.contacts;
+      const contacts =
+        (response as { contacts?: Contact[] }).contacts ||
+        (response as { data?: { contacts?: Contact[] } }).data?.contacts;
       
       if (contacts) {
         set({ contacts, lastSync: new Date() });

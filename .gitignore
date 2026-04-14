@@ -54,10 +54,12 @@ prisma/*.db-journal
 prisma/migrations/*.db
 
 # Uploads (keep directory structure)
-upload/
-!upload/.gitkeep
-download/
-!download/.gitkeep
+/upload/
+!/upload/
+!/upload/.gitkeep
+/download/
+!/download/
+!/download/.gitkeep
 
 # Cache
 .cache/

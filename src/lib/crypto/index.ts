@@ -210,11 +210,17 @@ export {
   importAllData,
   deleteDatabase,
   type StoredIdentityKeys,
+  type StoredEncryptedIdentityKeys,
   type StoredPreKeyBundle,
   type StoredSession,
   type StoredMessage,
   type StoredContact,
 } from './store';
+
+export {
+  KeyVault,
+  type EncryptedPrivateKeyPayload,
+} from './vault';
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 

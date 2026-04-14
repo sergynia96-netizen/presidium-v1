@@ -16,6 +16,7 @@ import { encryptMessage, decryptMessage, type EncryptedEnvelope } from '@/lib/cr
 import { generateSafetyNumbers, saveTrustRecord, getTrustRecords } from '@/lib/crypto/fingerprint';
 import { bytesToHex } from '@/lib/crypto/utils';
 import { getMessagesByChat, saveMessage, type StoredMessage } from '@/lib/crypto/store';
+import { KeyVault } from '@/lib/crypto/vault';
 import type { Message } from '@/types';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -57,8 +58,10 @@ class E2EChatIntegration {
     if (this.initialized) return;
 
     try {
+      const vaultPassword = KeyVault.getVaultPassword() || undefined;
+
       // Initialize session manager (generates/loads identity keys + pre-keys)
-      await sessionManager.initialize();
+      await sessionManager.initialize(vaultPassword);
 
       // Connect to relay
       await relayClient.connect();

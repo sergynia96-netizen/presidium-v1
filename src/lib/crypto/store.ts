@@ -5,6 +5,9 @@
  * All data is stored client-side only. The server never sees plaintext.
  */
 
+import { hexToBytes, bytesToHex } from './utils';
+import { KeyVault, type EncryptedPrivateKeyPayload } from './vault';
+
 const DB_NAME = 'presidium-crypto-db';
 const DB_VERSION = 1;
 
@@ -18,6 +21,9 @@ const STORES = {
 } as const;
 
 type StoreName = typeof STORES[keyof typeof STORES];
+
+const IDENTITY_LEGACY_KEY = 'identity';
+const IDENTITY_ENCRYPTED_KEY = 'identity_encrypted';
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -112,12 +118,74 @@ export interface StoredIdentityKeys {
   privateKey: string;
 }
 
-export async function getIdentityKeys(): Promise<StoredIdentityKeys | undefined> {
-  return get<StoredIdentityKeys>(STORES.IDENTITY_KEYS, 'identity');
+export interface StoredEncryptedIdentityKeys {
+  publicKey: string;
+  encryptedPrivateKey: EncryptedPrivateKeyPayload;
+  createdAt: number;
 }
 
-export async function saveIdentityKeys(keys: StoredIdentityKeys): Promise<void> {
-  return put(STORES.IDENTITY_KEYS, 'identity', keys);
+function resolveVaultPassword(password?: string): string | undefined {
+  if (password && password.trim()) return password.trim();
+  const fromVault = KeyVault.getVaultPassword();
+  return fromVault || undefined;
+}
+
+export async function getIdentityKeys(password?: string): Promise<StoredIdentityKeys | undefined> {
+  const encrypted = await get<StoredEncryptedIdentityKeys>(STORES.IDENTITY_KEYS, IDENTITY_ENCRYPTED_KEY);
+  const vaultPassword = resolveVaultPassword(password);
+
+  if (encrypted) {
+    if (!vaultPassword) {
+      throw new Error('Password required to decrypt identity keys');
+    }
+
+    const privateKeyBytes = await KeyVault.decryptPrivateKey(
+      encrypted.encryptedPrivateKey.encrypted,
+      encrypted.encryptedPrivateKey.salt,
+      encrypted.encryptedPrivateKey.iv,
+      vaultPassword,
+    );
+
+    return {
+      publicKey: encrypted.publicKey,
+      privateKey: bytesToHex(privateKeyBytes),
+    };
+  }
+
+  const legacy = await get<StoredIdentityKeys>(STORES.IDENTITY_KEYS, IDENTITY_LEGACY_KEY);
+  if (legacy && vaultPassword) {
+    // Automatic migration from plaintext to encrypted-at-rest storage.
+    await saveIdentityKeys(legacy, vaultPassword);
+  }
+
+  return legacy;
+}
+
+export async function saveIdentityKeys(keys: StoredIdentityKeys, password?: string): Promise<void> {
+  const vaultPassword = resolveVaultPassword(password);
+
+  if (vaultPassword) {
+    const encryptedPrivateKey = await KeyVault.encryptPrivateKey(
+      hexToBytes(keys.privateKey),
+      vaultPassword,
+    );
+
+    await put<StoredEncryptedIdentityKeys>(STORES.IDENTITY_KEYS, IDENTITY_ENCRYPTED_KEY, {
+      publicKey: keys.publicKey,
+      encryptedPrivateKey,
+      createdAt: Date.now(),
+    });
+
+    // Remove legacy plaintext key after successful encrypted write.
+    await remove(STORES.IDENTITY_KEYS, IDENTITY_LEGACY_KEY);
+    return;
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Password required for identity keys in production');
+  }
+
+  await put(STORES.IDENTITY_KEYS, IDENTITY_LEGACY_KEY, keys);
 }
 
 // ─── Pre-Keys ────────────────────────────────────────────────────────────────
@@ -129,16 +197,20 @@ export interface StoredPreKeyBundle {
   usedKeyIds: number[];
 }
 
-export async function getPreKeyBundle(type: 'identity' | 'prekeys') {
+export async function getPreKeyBundle(type: 'identity' | 'prekeys', password?: string) {
   if (type === 'identity') {
-    return getIdentityKeys();
+    return getIdentityKeys(password);
   }
   return get<StoredPreKeyBundle>(STORES.PRE_KEYS, 'prekeys');
 }
 
-export async function uploadPreKeyBundle(type: 'identity' | 'prekeys', data: unknown): Promise<void> {
+export async function uploadPreKeyBundle(
+  type: 'identity' | 'prekeys',
+  data: unknown,
+  password?: string,
+): Promise<void> {
   if (type === 'identity') {
-    return saveIdentityKeys(data as StoredIdentityKeys);
+    return saveIdentityKeys(data as StoredIdentityKeys, password);
   }
   return put(STORES.PRE_KEYS, 'prekeys', data as StoredPreKeyBundle);
 }

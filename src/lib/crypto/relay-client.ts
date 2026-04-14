@@ -17,8 +17,7 @@
  * - Message queue for offline delivery
  */
 
-import { getRelayHttpBaseUrl } from '../relay-base-url';
-import { getRelayAccessToken } from '../relay-auth';
+import { clearRelayAccessToken, getRelayAccessToken, setRelayAccessToken } from '../relay-auth';
 import type { PreKeyBundle, SerializedPreKeyBundle } from './prekeys';
 import { serializePreKeyBundle, deserializePreKeyBundle } from './prekeys';
 import type { EncryptedEnvelope } from './encrypt';
@@ -99,8 +98,8 @@ export type RelayEventHandler = (event: RelayEvent) => void;
 // ─── Default Config ─────────────────────────────────────────────────────────
 
 const DEFAULT_CONFIG: RelayConfig = {
-  httpBaseUrl: getRelayHttpBaseUrl(),
-  wsBaseUrl: (process.env.NEXT_PUBLIC_RELAY_WS_URL || 'ws://127.0.0.1:3001').replace(/\/+$/, ''),
+  httpBaseUrl: process.env.NEXT_PUBLIC_RELAY_HTTP_URL || 'http://127.0.0.1:3001',
+  wsBaseUrl: process.env.NEXT_PUBLIC_RELAY_WS_URL || 'ws://127.0.0.1:3001/ws',
   reconnectIntervalMs: 1000,
   maxReconnectIntervalMs: 30000,
   maxReconnectAttempts: 10,
@@ -112,10 +111,13 @@ function resolveRelayWebSocketUrl(baseUrl: string): string {
   const trimmed = baseUrl.replace(/\/+$/, '');
   try {
     const parsed = new URL(trimmed);
-    if (!parsed.pathname || parsed.pathname === '/') {
+    const normalizedPath = parsed.pathname.replace(/\/+$/, '');
+    if (!normalizedPath || normalizedPath === '/') {
       parsed.pathname = '/ws';
-    } else if (!parsed.pathname.endsWith('/ws')) {
-      parsed.pathname = `${parsed.pathname.replace(/\/+$/, '')}/ws`;
+    } else if (!normalizedPath.endsWith('/ws')) {
+      parsed.pathname = `${normalizedPath}/ws`;
+    } else {
+      parsed.pathname = normalizedPath;
     }
     return parsed.toString();
   } catch {
@@ -142,6 +144,34 @@ class RelayE2EClient {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
+  private async ensureRelayToken(): Promise<string> {
+    const existing = getRelayAccessToken();
+    if (existing) return existing;
+
+    if (typeof window === 'undefined') {
+      throw new Error('Relay token is missing');
+    }
+
+    const response = await fetch('/api/relay/token', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to get relay token (${response.status})`);
+    }
+
+    const data = (await response.json().catch(() => ({}))) as { token?: string };
+    const token = typeof data.token === 'string' ? data.token : '';
+    if (!token) {
+      throw new Error('Relay token response is invalid');
+    }
+
+    setRelayAccessToken(token);
+    return token;
+  }
+
   // ─── Connection Management ──────────────────────────────────────────────
 
   /**
@@ -156,49 +186,58 @@ class RelayE2EClient {
     return new Promise((resolve, reject) => {
       try {
         const wsUrl = resolveRelayWebSocketUrl(this.config.wsBaseUrl);
-        const token = getRelayAccessToken();
+        void (async () => {
+          const token = await this.ensureRelayToken();
+          console.log(`[RelayE2EClient] Token: ${token ? `present (${token.length} chars)` : 'missing'}`);
 
-        this.ws = new WebSocket(wsUrl);
+          this.ws = new WebSocket(wsUrl);
 
-        this.ws.onopen = () => {
-          this.isConnected = true;
+          this.ws.onopen = () => {
+            this.isConnected = true;
+            this.isConnecting = false;
+            this.reconnectAttempts = 0;
+            console.log(`[RelayE2EClient] Connected to ${wsUrl}`);
+
+            // Authenticate (relay expects payload.token)
+            this.ws!.send(JSON.stringify({ type: 'auth', payload: { token } }));
+
+            // Start ping
+            this.startPing();
+
+            this.emit({ type: 'connected' });
+            resolve();
+          };
+
+          this.ws.onclose = (event) => {
+            this.isConnected = false;
+            this.isConnecting = false;
+            this.stopPing();
+
+            if (event.code === 4001 || event.code === 4002) {
+              clearRelayAccessToken();
+            }
+
+            this.emit({ type: 'disconnected', reason: event.reason || 'Connection closed' });
+
+            // Attempt reconnection
+            if (this.reconnectAttempts < this.config.maxReconnectAttempts) {
+              this.scheduleReconnect();
+            }
+          };
+
+          this.ws.onerror = (error) => {
+            this.isConnecting = false;
+            this.emit({ type: 'error', error: new Error('WebSocket error') });
+            reject(error);
+          };
+
+          this.ws.onmessage = (event) => {
+            this.handleMessage(event.data);
+          };
+        })().catch((error) => {
           this.isConnecting = false;
-          this.reconnectAttempts = 0;
-
-          // Authenticate
-          if (token) {
-            this.ws!.send(JSON.stringify({ type: 'auth', token }));
-          }
-
-          // Start ping
-          this.startPing();
-
-          this.emit({ type: 'connected' });
-          resolve();
-        };
-
-        this.ws.onclose = (event) => {
-          this.isConnected = false;
-          this.isConnecting = false;
-          this.stopPing();
-
-          this.emit({ type: 'disconnected', reason: event.reason || 'Connection closed' });
-
-          // Attempt reconnection
-          if (this.reconnectAttempts < this.config.maxReconnectAttempts) {
-            this.scheduleReconnect();
-          }
-        };
-
-        this.ws.onerror = (error) => {
-          this.isConnecting = false;
-          this.emit({ type: 'error', error: new Error('WebSocket error') });
           reject(error);
-        };
-
-        this.ws.onmessage = (event) => {
-          this.handleMessage(event.data);
-        };
+        });
       } catch (error) {
         this.isConnecting = false;
         reject(error);
@@ -330,9 +369,11 @@ class RelayE2EClient {
 
         case 'connected':
           // Already handled in onopen
+          console.log('[RelayE2EClient] Auth response:', JSON.stringify(parsed));
           break;
 
         case 'error':
+          console.log('[RelayE2EClient] Auth response:', JSON.stringify(parsed));
           this.emit({ type: 'error', error: new Error((parsed as any).message || 'Relay error') });
           break;
 
@@ -382,10 +423,16 @@ class RelayE2EClient {
       });
 
       try {
+        // Send in the format expected by relay backend:
+        // { type: 'relay.envelope', payload: { type, to, content, timestamp, moderation } }
         this.ws!.send(JSON.stringify({
           type: 'relay.envelope',
-          to: envelope.recipientId,
-          payload: envelope,
+          payload: {
+            type: 'message',
+            to: envelope.recipientId,
+            content: JSON.stringify(envelope),
+            timestamp: envelope.timestamp,
+          },
         }));
       } catch (error) {
         clearTimeout(timeout);
@@ -427,7 +474,7 @@ class RelayE2EClient {
    */
   async uploadPreKeyBundle(bundle: PreKeyBundle): Promise<void> {
     const serialized = serializePreKeyBundle(bundle);
-    const token = getRelayAccessToken();
+    const token = await this.ensureRelayToken();
 
     // Convert from client SerializedPreKeyBundle to relay PreKeyUploadBody format
     const relayBody = {
@@ -455,7 +502,7 @@ class RelayE2EClient {
    * Fetch a user's pre-key bundle from the relay.
    */
   async fetchPreKeyBundle(userId: string): Promise<PreKeyBundle | null> {
-    const token = getRelayAccessToken();
+    const token = await this.ensureRelayToken();
 
     const response = await fetch(`${this.config.httpBaseUrl}/api/keys/${userId}`, {
       headers: {

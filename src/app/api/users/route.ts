@@ -44,11 +44,20 @@ export async function GET(request: NextRequest) {
     const where: Record<string, unknown> = {};
 
     if (search) {
+      const normalizedSearch = search.trim();
+      const normalizedUsername = normalizedSearch.replace(/^@+/, '');
       where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { email: { contains: search, mode: 'insensitive' } },
-        { username: { contains: search, mode: 'insensitive' } },
+        { name: { contains: normalizedSearch } },
+        { email: { contains: normalizedSearch } },
+        { username: { contains: normalizedSearch } },
+        { phone: { contains: normalizedSearch } },
       ];
+
+      if (normalizedUsername && normalizedUsername !== normalizedSearch) {
+        (where.OR as Array<Record<string, unknown>>).push({
+          username: { contains: normalizedUsername },
+        });
+      }
     }
 
     if (status && ['online', 'away', 'offline'].includes(status)) {
@@ -66,6 +75,7 @@ export async function GET(request: NextRequest) {
           email: true,
           name: true,
           username: true,
+          phone: true,
           avatar: true,
           status: true,
           bio: true,

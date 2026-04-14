@@ -102,14 +102,14 @@ class SessionManager {
    * Initialize the session manager.
    * Must be called before any other method.
    */
-  async initialize(): Promise<void> {
+  async initialize(vaultPassword?: string): Promise<void> {
     if (this.isInitialized) return;
 
     // Load or create local identity keys
-    this.localIdentityKeys = await getOrCreateIdentityKeys();
+    this.localIdentityKeys = await getOrCreateIdentityKeys(vaultPassword);
 
     // Load or create pre-key bundles
-    this.localPreKeys = await getOrCreatePreKeys();
+    this.localPreKeys = await getOrCreatePreKeys(vaultPassword);
 
     // Restore sessions from IndexedDB
     await this.restoreSessions();

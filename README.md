@@ -7,6 +7,12 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)
 ![Tailwind](https://img.shields.io/badge/Tailwind-4-38bdf8?logo=tailwind-css)
 
+## 📍 Current Status
+
+- Latest verified snapshot: **April 14, 2026**
+- See [`CURRENT_STATE_2026-04-14.md`](./CURRENT_STATE_2026-04-14.md) for actual health/build/E2E status and open items.
+- Historical deep reports: `AUDIT_DEEP.md`, `AUDIT_REPORT.md`, `POST_FIX_AUDIT.md`.
+
 ## 🚀 Features
 
 - **💬 Real-time Messaging** — Private and group chats with E2EE

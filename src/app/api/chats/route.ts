@@ -5,14 +5,24 @@ import { db } from '@/lib/db';
 import { rateLimit } from '@/lib/rate-limit';
 import { z } from 'zod';
 
-const createChatSchema = z.object({
-  name: z.string().min(1).max(100),
-  type: z.enum(['private', 'group']),
-  avatar: z.string().optional(),
-  memberIds: z.array(z.string()).min(1).optional(), // For group chats
-  isEncrypted: z.boolean().optional().default(true),
-  encryptionType: z.enum(['e2e', 'p2p', 'server']).optional().default('e2e'),
-});
+const createChatSchema = z
+  .object({
+    name: z.string().min(1).max(100),
+    type: z.enum(['private', 'group']),
+    avatar: z.string().optional(),
+    memberIds: z.array(z.string()).min(1).optional(), // For group chats
+    isEncrypted: z.boolean().optional().default(true),
+    encryptionType: z.enum(['e2e', 'p2p', 'server']).optional().default('e2e'),
+  })
+  .superRefine((value, ctx) => {
+    if (value.type === 'private' && (!value.memberIds || value.memberIds.length !== 1)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['memberIds'],
+        message: 'Private chat requires exactly one target memberId',
+      });
+    }
+  });
 
 /**
  * GET /api/chats - List user's chats
@@ -141,6 +151,91 @@ export async function POST(request: NextRequest) {
     }
 
     const { name, type, avatar, memberIds, isEncrypted, encryptionType } = parseResult.data;
+    const normalizedMemberIds = Array.from(
+      new Set((memberIds || []).filter((id) => id !== session.user.id)),
+    );
+
+    if (type === 'private') {
+      const targetId = normalizedMemberIds[0];
+      if (!targetId) {
+        return NextResponse.json(
+          { error: 'Private chat requires a target memberId' },
+          { status: 400 },
+        );
+      }
+
+      const targetUser = await db.user.findUnique({
+        where: { id: targetId },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          avatar: true,
+          status: true,
+        },
+      });
+
+      if (!targetUser) {
+        return NextResponse.json(
+          { error: 'Target user not found' },
+          { status: 404 },
+        );
+      }
+
+      // Reuse existing private chat between the same two users.
+      const existingPrivateCandidates = await db.chat.findMany({
+        where: {
+          type: 'private',
+          members: {
+            some: { userId: session.user.id },
+          },
+          AND: [
+            {
+              members: {
+                some: { userId: targetId },
+              },
+            },
+          ],
+        },
+        include: {
+          members: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  avatar: true,
+                  status: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      const existingPrivate = existingPrivateCandidates.find((candidate) => {
+        const ids = candidate.members.map((member) => member.userId);
+        return ids.length === 2 && ids.includes(session.user.id) && ids.includes(targetId);
+      });
+
+      if (existingPrivate) {
+        return NextResponse.json({
+          success: true,
+          chat: {
+            id: existingPrivate.id,
+            name: existingPrivate.name,
+            type: existingPrivate.type,
+            avatar: existingPrivate.avatar,
+            isEncrypted: existingPrivate.isEncrypted,
+            encryptionType: existingPrivate.encryptionType,
+            members: existingPrivate.members.map((m) => m.user),
+            createdAt: existingPrivate.createdAt,
+          },
+          reused: true,
+        });
+      }
+    }
 
     // Create chat with members
     const chat = await db.chat.create({
@@ -158,10 +253,8 @@ export async function POST(request: NextRequest) {
               role: 'admin',
             },
             // Add other members for group chats
-            ...(type === 'group' && memberIds
-              ? memberIds
-                  .filter((id) => id !== session.user.id)
-                  .map((userId) => ({
+            ...(normalizedMemberIds.length > 0
+              ? normalizedMemberIds.map((userId) => ({
                     userId,
                     role: 'member' as const,
                   }))

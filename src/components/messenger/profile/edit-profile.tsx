@@ -1,13 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState, type ChangeEvent } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Camera, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { useAppStore } from '@/store/use-app-store';
@@ -37,8 +37,12 @@ export default function EditProfileScreen() {
   const [bio, setBio] = useState(user?.bio || '');
   const [phone, setPhone] = useState(user?.phone || '');
   const [email, setEmail] = useState(user?.email || '');
+  const [avatarUrl, setAvatarUrl] = useState(user?.avatar || '');
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
+  const canSave = Boolean(user?.id && name.trim() && email.trim());
 
   const initials = name
     .split(' ')
@@ -48,18 +52,27 @@ export default function EditProfileScreen() {
     .slice(0, 2);
 
   const handleSave = async () => {
-    if (!user?.id || !name.trim() || !username.trim() || !email.trim()) return;
+    if (!canSave || !user?.id) {
+      toast({
+        variant: 'destructive',
+        title: 'Name and email are required',
+      });
+      return;
+    }
 
     setSaving(true);
     try {
+      const normalizedUsername = username.trim().replace(/^@+/, '');
+      const trimmedPhone = phone.trim();
+
       const res = await fetch(`/api/users/${user.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: name.trim(),
-          username: username.trim().replace(/^@+/, ''),
+          ...(normalizedUsername ? { username: normalizedUsername } : {}),
           bio: bio.trim(),
-          phone: phone.trim(),
+          ...(trimmedPhone ? { phone: trimmedPhone } : {}),
           email: email.trim(),
         }),
       });
@@ -90,7 +103,7 @@ export default function EditProfileScreen() {
                 name: payload.user?.name || state.user.name,
                 email: payload.user?.email || state.user.email,
                 username: payload.user?.username || undefined,
-                avatar: payload.user?.avatar || state.user.avatar,
+                avatar: payload.user?.avatar || avatarUrl || state.user.avatar,
                 bio: payload.user?.bio || undefined,
                 phone: payload.user?.phone || undefined,
                 birthday: payload.user?.birthday || undefined,
@@ -115,6 +128,51 @@ export default function EditProfileScreen() {
     }
   };
 
+  const handleAvatarUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !user?.id) {
+      return;
+    }
+
+    setAvatarUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/upload/avatar', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as { error?: string; url?: string };
+      if (!response.ok || !payload.url) {
+        throw new Error(payload.error || 'Failed to upload avatar');
+      }
+
+      setAvatarUrl(payload.url);
+      useAppStore.setState((state) => ({
+        user: state.user
+          ? {
+              ...state.user,
+              avatar: payload.url || state.user.avatar,
+            }
+          : state.user,
+      }));
+
+      toast({
+        title: 'Avatar updated',
+      });
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: error instanceof Error ? error.message : 'Failed to upload avatar',
+      });
+    } finally {
+      setAvatarUploading(false);
+      event.target.value = '';
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-background">
       {/* Header */}
@@ -132,7 +190,7 @@ export default function EditProfileScreen() {
               : ''
           )}
           onClick={handleSave}
-          disabled={saving}
+          disabled={saving || !canSave}
         >
           {saving ? (
             <div className="size-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
@@ -152,18 +210,32 @@ export default function EditProfileScreen() {
         >
           {/* Avatar with camera overlay */}
           <motion.div variants={item as unknown as never} className="flex justify-center pt-4 pb-2">
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleAvatarUpload}
+            />
             <button
               type="button"
               className="relative group"
+              onClick={() => avatarInputRef.current?.click()}
+              disabled={avatarUploading}
             >
               <Avatar className="size-28">
+                {avatarUrl ? <AvatarImage src={avatarUrl} alt={name || 'Avatar'} /> : null}
                 <AvatarFallback className="text-3xl font-bold bg-primary text-primary-foreground">
                   {initials}
                 </AvatarFallback>
               </Avatar>
               <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/0 group-hover:bg-black/40 transition-colors">
                 <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center size-12 rounded-full bg-background/90">
-                  <Camera className="size-5 text-foreground" />
+                  {avatarUploading ? (
+                    <div className="size-5 animate-spin rounded-full border-2 border-current border-t-transparent text-foreground" />
+                  ) : (
+                    <Camera className="size-5 text-foreground" />
+                  )}
                 </div>
               </div>
             </button>

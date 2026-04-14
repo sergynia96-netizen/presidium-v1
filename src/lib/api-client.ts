@@ -71,6 +71,7 @@ export interface User {
   avatar?: string;
   status?: string;
   username?: string;
+  phone?: string;
 }
 
 export const authApi = {
@@ -369,7 +370,15 @@ export const contactsApi = {
     );
   },
 
-  add: (data: { contactId: string; name?: string; isFavorite?: boolean }) =>
+  add: (data: {
+    contactId?: string;
+    username?: string;
+    email?: string;
+    phone?: string;
+    query?: string;
+    name?: string;
+    isFavorite?: boolean;
+  }) =>
     fetchApi<ApiResponse<{ contact: Contact }>>('/contacts', {
       method: 'POST',
       body: JSON.stringify(data),
