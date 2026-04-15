@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { useAppStore } from '@/store/use-app-store';
+import { useApiStore } from '@/store/use-api-store';
 import { useT } from '@/lib/i18n';
 import type { TranslationKey } from '@/lib/i18n';
 
@@ -31,7 +32,7 @@ interface MenuItem {
   labelKey?: TranslationKey;
   label?: string;
   icon: React.ElementType;
-  action: () => void;
+  action: () => void | Promise<void>;
   destructive?: boolean;
 }
 
@@ -41,7 +42,6 @@ export default function ChatContextMenu({ chatId, isOpen, onClose }: ChatContext
     chats,
     blockedChatIds,
     togglePin,
-    toggleMute,
     setChatNotificationLevel,
     markUnread,
     archiveChat,
@@ -53,6 +53,7 @@ export default function ChatContextMenu({ chatId, isOpen, onClose }: ChatContext
     blockChat,
     unblockChat,
   } = useAppStore();
+  const syncChats = useApiStore((s) => s.syncChats);
 
   const isBlocked = useMemo(
     () => blockedChatIds.includes(chatId),
@@ -65,11 +66,52 @@ export default function ChatContextMenu({ chatId, isOpen, onClose }: ChatContext
   );
 
   const handleAction = useCallback(
-    (action: () => void) => {
-      action();
+    async (action: () => void | Promise<void>) => {
+      try {
+        await action();
+      } catch (error) {
+        console.error('[chat-context-menu] Action failed:', error);
+      }
       onClose();
     },
     [onClose]
+  );
+
+  const persistNotificationLevel = useCallback(
+    async (level: 'all' | 'mentions' | 'muted') => {
+      const apiLevel = level === 'all' ? 'ALL' : level === 'mentions' ? 'MENTIONS' : 'MUTED';
+      const response = await fetch(`/api/chats/${chatId}/notifications`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ level: apiLevel }),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to update notification level');
+      }
+      setChatNotificationLevel(chatId, level);
+      void syncChats();
+    },
+    [chatId, setChatNotificationLevel, syncChats],
+  );
+
+  const persistArchiveState = useCallback(
+    async (archived: boolean) => {
+      const response = await fetch('/api/chats/archive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId, archived }),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to update archive state');
+      }
+      if (archived) {
+        archiveChat(chatId);
+      } else {
+        restoreChat(chatId);
+      }
+      void syncChats();
+    },
+    [archiveChat, chatId, restoreChat, syncChats],
   );
 
   const menuItems: MenuItem[] = useMemo(() => {
@@ -84,7 +126,7 @@ export default function ChatContextMenu({ chatId, isOpen, onClose }: ChatContext
       {
         labelKey: chat.isMuted ? 'ctx.unmute' : 'ctx.mute',
         icon: chat.isMuted ? Bell : BellOff,
-        action: () => toggleMute(chatId),
+        action: () => persistNotificationLevel(chat.isMuted ? 'all' : 'muted'),
       },
       {
         label:
@@ -95,17 +137,17 @@ export default function ChatContextMenu({ chatId, isOpen, onClose }: ChatContext
               ? t('ctx.notificationMuted')
               : t('ctx.notificationAll')),
         icon: BellRing,
-        action: () => setChatNotificationLevel(chatId, 'all'),
+        action: () => persistNotificationLevel('all'),
       },
       {
         label: `${t('ctx.notificationLevel')}: ${t('ctx.notificationMentions')}`,
         icon: Bell,
-        action: () => setChatNotificationLevel(chatId, 'mentions'),
+        action: () => persistNotificationLevel('mentions'),
       },
       {
         label: `${t('ctx.notificationLevel')}: ${t('ctx.notificationMuted')}`,
         icon: BellOff,
-        action: () => setChatNotificationLevel(chatId, 'muted'),
+        action: () => persistNotificationLevel('muted'),
       },
       {
         labelKey: 'ctx.markUnread',
@@ -115,7 +157,7 @@ export default function ChatContextMenu({ chatId, isOpen, onClose }: ChatContext
       {
         labelKey: chat.isArchived ? 'ctx.restoreFromArchive' : 'ctx.archive',
         icon: Archive,
-        action: () => (chat.isArchived ? restoreChat(chatId) : archiveChat(chatId)),
+        action: () => persistArchiveState(!chat.isArchived),
       },
       {
         labelKey: 'ctx.newWindow',
@@ -144,7 +186,18 @@ export default function ChatContextMenu({ chatId, isOpen, onClose }: ChatContext
     }
 
     return items;
-  }, [chat, chatFolders, chatId, togglePin, toggleMute, setChatNotificationLevel, markUnread, restoreChat, archiveChat, clearChat, toggleChatInFolder, t]);
+  }, [
+    chat,
+    chatFolders,
+    chatId,
+    togglePin,
+    markUnread,
+    clearChat,
+    toggleChatInFolder,
+    t,
+    persistArchiveState,
+    persistNotificationLevel,
+  ]);
 
   const destructiveItems: MenuItem[] = useMemo(
     () => [

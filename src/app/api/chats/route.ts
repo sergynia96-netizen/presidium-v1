@@ -84,7 +84,14 @@ export async function GET(request: NextRequest) {
       lastMessageTime: member.chat.messages[0]?.createdAt.toISOString() || '',
       unreadCount: 0, // TODO: Calculate from read receipts
       isPinned: false, // TODO: Add to ChatMember model
-      isMuted: false, // TODO: Add to ChatMember model
+      isMuted: member.notificationLevel === 'MUTED',
+      notificationLevel:
+        member.notificationLevel === 'MENTIONS'
+          ? 'mentions'
+          : member.notificationLevel === 'MUTED'
+            ? 'muted'
+            : 'all',
+      isArchived: member.isArchived,
       isEncrypted: member.chat.isEncrypted,
       encryptionType: member.chat.encryptionType,
       role: member.role,

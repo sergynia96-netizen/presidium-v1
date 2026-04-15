@@ -144,9 +144,29 @@ class RelayE2EClient {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
-  private async ensureRelayToken(): Promise<string> {
+  private isJwtExpired(token: string): boolean {
+    try {
+      const [, payloadBase64] = token.split('.');
+      if (!payloadBase64) return true;
+      const payloadJson = atob(payloadBase64.replace(/-/g, '+').replace(/_/g, '/'));
+      const payload = JSON.parse(payloadJson) as { exp?: number };
+      if (typeof payload.exp !== 'number') return false;
+      // Refresh a little earlier to avoid edge-expiry races.
+      return payload.exp * 1000 <= Date.now() + 60_000;
+    } catch {
+      return true;
+    }
+  }
+
+  private async ensureRelayToken(forceRefresh: boolean = false): Promise<string> {
     const existing = getRelayAccessToken();
-    if (existing) return existing;
+    if (!forceRefresh && existing && !this.isJwtExpired(existing)) {
+      return existing;
+    }
+
+    if (existing) {
+      clearRelayAccessToken();
+    }
 
     if (typeof window === 'undefined') {
       throw new Error('Relay token is missing');
@@ -170,6 +190,37 @@ class RelayE2EClient {
 
     setRelayAccessToken(token);
     return token;
+  }
+
+  private async fetchWithRelayAuth(
+    input: string,
+    init: RequestInit = {},
+  ): Promise<Response> {
+    const token = await this.ensureRelayToken();
+    const headers = new Headers(init.headers || {});
+    headers.set('Authorization', `Bearer ${token}`);
+
+    let response = await fetch(input, {
+      ...init,
+      headers,
+    });
+
+    if (response.status !== 401) {
+      return response;
+    }
+
+    // Token could be stale/revoked. Refresh once and retry.
+    clearRelayAccessToken();
+    const refreshedToken = await this.ensureRelayToken(true);
+    const retryHeaders = new Headers(init.headers || {});
+    retryHeaders.set('Authorization', `Bearer ${refreshedToken}`);
+
+    response = await fetch(input, {
+      ...init,
+      headers: retryHeaders,
+    });
+
+    return response;
   }
 
   // ─── Connection Management ──────────────────────────────────────────────
@@ -372,10 +423,22 @@ class RelayE2EClient {
           console.log('[RelayE2EClient] Auth response:', JSON.stringify(parsed));
           break;
 
-        case 'error':
-          console.log('[RelayE2EClient] Auth response:', JSON.stringify(parsed));
-          this.emit({ type: 'error', error: new Error((parsed as any).message || 'Relay error') });
+        case 'error': {
+          const parsedAny = parsed as any;
+          const errorMessage =
+            parsedAny?.message ||
+            parsedAny?.payload?.message ||
+            'Relay error';
+          const errorCode = parsedAny?.payload?.code;
+          console.log('[RelayE2EClient] Error response:', JSON.stringify(parsed));
+
+          if (errorCode === 'auth_required' || /auth|token|unauthorized/i.test(String(errorMessage))) {
+            clearRelayAccessToken();
+          }
+
+          this.emit({ type: 'error', error: new Error(String(errorMessage)) });
           break;
+        }
 
         default:
           console.warn('[RelayE2EClient] Unknown message type:', (parsed as any).type);
@@ -474,7 +537,6 @@ class RelayE2EClient {
    */
   async uploadPreKeyBundle(bundle: PreKeyBundle): Promise<void> {
     const serialized = serializePreKeyBundle(bundle);
-    const token = await this.ensureRelayToken();
 
     // Convert from client SerializedPreKeyBundle to relay PreKeyUploadBody format
     const relayBody = {
@@ -484,11 +546,10 @@ class RelayE2EClient {
       oneTimePreKeys: serialized.oneTimePreKeys.map(k => k.publicKey),
     };
 
-    const response = await fetch(`${this.config.httpBaseUrl}/api/keys/upload`, {
+    const response = await this.fetchWithRelayAuth(`${this.config.httpBaseUrl}/api/keys/upload`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
       },
       body: JSON.stringify(relayBody),
     });
@@ -502,13 +563,7 @@ class RelayE2EClient {
    * Fetch a user's pre-key bundle from the relay.
    */
   async fetchPreKeyBundle(userId: string): Promise<PreKeyBundle | null> {
-    const token = await this.ensureRelayToken();
-
-    const response = await fetch(`${this.config.httpBaseUrl}/api/keys/${userId}`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
+    const response = await this.fetchWithRelayAuth(`${this.config.httpBaseUrl}/api/keys/${userId}`);
 
     if (response.status === 404) {
       return null;

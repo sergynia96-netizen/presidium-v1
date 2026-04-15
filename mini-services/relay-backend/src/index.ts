@@ -35,6 +35,7 @@ import type {
 } from './types';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
+const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || '';
 const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000')
   .split(',')
   .map((origin) => origin.trim())
@@ -118,6 +119,14 @@ interface CreateOpenClawReportBody {
   metadata?: Record<string, unknown> | null;
 }
 
+interface InternalSyncUserBody {
+  externalId: string;
+  username: string;
+  email: string;
+  displayName?: string;
+  source?: string;
+}
+
 // ─── HTTP Server ───────────────────────────────────
 
 const server = createServer(async (req, res) => {
@@ -162,6 +171,91 @@ const server = createServer(async (req, res) => {
           'X-RateLimit-Reset': String(Math.floor(rate.resetAt / 1000)),
         },
       );
+    }
+
+    // ── Internal: Sync user from Main App ───────
+    if (method === 'POST' && path === '/internal/sync/user') {
+      if (!INTERNAL_API_KEY) {
+        return send(res, 503, { error: 'Internal sync is not configured' });
+      }
+
+      const rawAuthHeader = req.headers['authorization'];
+      const authHeader = Array.isArray(rawAuthHeader) ? rawAuthHeader[0] : rawAuthHeader;
+      const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+      if (!token || token !== INTERNAL_API_KEY) {
+        return send(res, 401, { error: 'Unauthorized' });
+      }
+
+      const body = await json<InternalSyncUserBody>(req);
+      const externalId = typeof body.externalId === 'string' ? body.externalId.trim() : '';
+      const rawUsername = typeof body.username === 'string' ? body.username.trim() : '';
+      const rawEmail = typeof body.email === 'string' ? body.email.trim() : '';
+      const normalizedUsername = rawUsername.replace(/^@+/, '').toLowerCase();
+      const normalizedEmail = rawEmail.toLowerCase();
+      const normalizedDisplayName = (
+        typeof body.displayName === 'string' && body.displayName.trim().length > 0
+          ? body.displayName.trim()
+          : normalizedUsername
+      ).slice(0, 120);
+
+      if (!externalId || !normalizedUsername || !normalizedEmail) {
+        return send(res, 400, { error: 'externalId, username, and email are required' });
+      }
+
+      const existingById = await prisma.account.findUnique({
+        where: { id: externalId },
+        select: { id: true },
+      });
+      const existingByEmail = await prisma.account.findUnique({
+        where: { email: normalizedEmail },
+        select: { id: true },
+      });
+      const existingByUsername = await prisma.account.findUnique({
+        where: { username: normalizedUsername },
+        select: { id: true },
+      });
+
+      // For a new account, do not steal email owned by another account.
+      if (!existingById && existingByEmail && existingByEmail.id !== externalId) {
+        return send(res, 409, { error: 'Email already exists in relay' });
+      }
+
+      const updateData: {
+        email?: string;
+        username?: string;
+        displayName: string;
+      } = {
+        displayName: normalizedDisplayName,
+      };
+
+      if (!existingByEmail || existingByEmail.id === externalId) {
+        updateData.email = normalizedEmail;
+      }
+      if (!existingByUsername || existingByUsername.id === externalId) {
+        updateData.username = normalizedUsername;
+      }
+
+      const account = await prisma.account.upsert({
+        where: { id: externalId },
+        update: updateData,
+        create: {
+          id: externalId,
+          email: normalizedEmail,
+          passwordHash: '',
+          displayName: normalizedDisplayName,
+          username: !existingByUsername || existingByUsername.id === externalId ? normalizedUsername : null,
+          publicKey: '',
+        },
+        select: {
+          id: true,
+          email: true,
+          displayName: true,
+          username: true,
+          updatedAt: true,
+        },
+      });
+
+      return send(res, 200, { success: true, account });
     }
 
     // ── Auth: Register ────────────────────────────

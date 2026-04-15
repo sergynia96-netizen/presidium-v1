@@ -46,6 +46,7 @@ model User {
 
   @@index([email])
   @@index([username])
+  @@index([phone])
 }
 
 model Bot {
@@ -136,34 +137,42 @@ model VerificationToken {
 }
 
 model ChatMember {
-  id       String   @id @default(cuid())
-  userId   String
-  chatId   String
-  role     String   @default("member")
-  joinedAt DateTime @default(now())
-  user     User     @relation(fields: [userId], references: [id])
-  chat     Chat     @relation(fields: [chatId], references: [id])
+  id                  String    @id @default(cuid())
+  userId              String
+  chatId              String
+  role                String    @default("member")
+  joinedAt            DateTime  @default(now())
+  isArchived          Boolean   @default(false)
+  archivedAt          DateTime?
+  draftContent        String?   // JSON: { content, replyTo, mentions }
+  draftUpdatedAt      DateTime?
+  notificationLevel   String    @default("ALL") // ALL | MENTIONS | MUTED
+  user                User      @relation(fields: [userId], references: [id])
+  chat                Chat      @relation(fields: [chatId], references: [id])
 
   @@index([userId])
   @@index([chatId])
+  @@index([isArchived])
+  @@unique([userId, chatId])
 }
 
 model Chat {
-  id              String       @id @default(cuid())
-  type            String       @default("private")
-  name            String
-  avatar          String       @default("")
-  lastMessage     String       @default("")
-  lastMessageTime String       @default("")
-  unreadCount     Int          @default(0)
-  isPinned        Boolean      @default(false)
-  isMuted         Boolean      @default(false)
-  isEncrypted     Boolean      @default(false)
-  encryptionType  String?
-  members         ChatMember[]
-  messages        Message[]
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  id                String       @id @default(cuid())
+  type              String       @default("private")
+  name              String
+  avatar            String       @default("")
+  lastMessage       String       @default("")
+  lastMessageTime   String       @default("")
+  unreadCount       Int          @default(0)
+  isPinned          Boolean      @default(false)
+  isMuted           Boolean      @default(false)
+  isEncrypted       Boolean      @default(false)
+  encryptionType    String?
+  pinnedMessageId   String?
+  members           ChatMember[]
+  messages          Message[]
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 }
 
 model Message {
@@ -174,7 +183,7 @@ model Message {
   senderAvatar            String   @default("")
   content                 String
   type                    String   @default("text")
-  status                  String   @default("sent")
+  status                  String   @default("sent") // sent | delivered | read
   isMe                    Boolean  @default(false)
   mediaUrl                String?
   mediaType               String?
@@ -183,6 +192,7 @@ model Message {
   mediaMimeType           String?
   isPinned                Boolean  @default(false)
   isEdited                Boolean  @default(false)
+  readAt                  DateTime?
   replyToMessageId        String?
   replyToSenderName       String?
   replyToContent          String?
@@ -199,6 +209,21 @@ model Message {
 
   @@index([chatId])
   @@index([senderId])
+  @@index([status])
+}
+
+model SyncRetry {
+  id        String   @id @default(cuid())
+  model     String
+  data      String   // JSON
+  attempts  Int      @default(0)
+  maxRetries Int     @default(5)
+  nextRetry DateTime
+  lastError String?
+  createdAt DateTime @default(now())
+
+  @@index([nextRetry])
+  @@index([model])
 }
 
 model UserSettings {

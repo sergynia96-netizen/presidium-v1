@@ -115,12 +115,12 @@ class E2EChatIntegration {
   /**
    * Get the current E2E state for a chat.
    */
-  getChatState(chatId: string): E2EChatState {
-    const session = sessionManager.getSession(chatId);
+  getChatState(peerId: string): E2EChatState {
+    const session = sessionManager.getSession(peerId);
     const trustRecords = getTrustRecords();
     const isVerified = session?.remoteIdentityKey
       ? trustRecords.some(
-          r => r.userId === chatId && r.identityKey === bytesToHex(session.remoteIdentityKey!),
+          r => r.userId === peerId && r.identityKey === bytesToHex(session.remoteIdentityKey!),
         )
       : false;
 
@@ -137,9 +137,9 @@ class E2EChatIntegration {
   /**
    * Get safety number for a chat.
    */
-  async getSafetyNumber(chatId: string): Promise<string | null> {
+  async getSafetyNumber(peerId: string): Promise<string | null> {
     const identityKeys = sessionManager.getLocalIdentityKeys();
-    const session = sessionManager.getSession(chatId);
+    const session = sessionManager.getSession(peerId);
 
     if (!identityKeys || !session?.remoteIdentityKey) {
       return null;
@@ -152,12 +152,12 @@ class E2EChatIntegration {
   /**
    * Verify a safety number for a chat.
    */
-  async verifySafetyNumber(chatId: string, _expectedNumber: string): Promise<boolean> {
-    const session = sessionManager.getSession(chatId);
+  async verifySafetyNumber(peerId: string, _expectedNumber: string): Promise<boolean> {
+    const session = sessionManager.getSession(peerId);
     if (!session?.remoteIdentityKey) return false;
 
     saveTrustRecord({
-      userId: chatId,
+      userId: peerId,
       identityKey: bytesToHex(session.remoteIdentityKey),
       verifiedAt: Date.now(),
       verificationMethod: 'safety-number',

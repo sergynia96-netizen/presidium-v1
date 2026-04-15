@@ -86,6 +86,7 @@ export interface SessionRestoreResult {
 const MAX_FAILED_ATTEMPTS = 3;
 const SESSION_TIMEOUT_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const AUTO_SAVE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const MISSING_PREKEY_RETRY_MS = 30 * 1000; // 30 seconds
 
 // ─── Session Store ───────────────────────────────────────────────────────────
 
@@ -95,6 +96,8 @@ class SessionManager {
   private isInitialized = false;
   private localIdentityKeys: IdentityKeyPair | null = null;
   private localPreKeys: LocalPreKeyBundle | null = null;
+  private creatingSessions = new Map<string, Promise<E2ESession>>();
+  private missingPreKeyRetryAt = new Map<string, number>();
 
   // ─── Initialization ─────────────────────────────────────────────────────
 
@@ -205,8 +208,30 @@ class SessionManager {
       return existing;
     }
 
-    // Create new session
-    return this.createSession(recipientId);
+    // Deduplicate parallel session creation attempts for the same recipient.
+    const inFlight = this.creatingSessions.get(recipientId);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    // Back off after a known "missing pre-key bundle" state to avoid 404 spam.
+    if (!options.forceRefresh && this.isMissingPreKeyRetryPending(recipientId)) {
+      throw new Error(`No pre-key bundle available for ${recipientId}`);
+    }
+
+    const creationPromise = this.createSession(recipientId)
+      .then((session) => {
+        this.missingPreKeyRetryAt.delete(recipientId);
+        return session;
+      })
+      .finally(() => {
+        if (this.creatingSessions.get(recipientId) === creationPromise) {
+          this.creatingSessions.delete(recipientId);
+        }
+      });
+
+    this.creatingSessions.set(recipientId, creationPromise);
+    return creationPromise;
   }
 
   /**
@@ -240,6 +265,7 @@ class SessionManager {
     // Fetch recipient's pre-key bundle from relay
     const remoteBundle = await this.fetchRemotePreKeyBundle(recipientId);
     if (!remoteBundle) {
+      this.missingPreKeyRetryAt.set(recipientId, Date.now() + MISSING_PREKEY_RETRY_MS);
       throw new Error(`No pre-key bundle available for ${recipientId}`);
     }
 
@@ -344,6 +370,7 @@ class SessionManager {
     };
 
     this.sessions.set(senderId, session);
+    this.missingPreKeyRetryAt.delete(senderId);
     await this.saveSession(senderId);
 
     // Update contact
@@ -372,6 +399,8 @@ class SessionManager {
    */
   async deleteSession(recipientId: string): Promise<void> {
     this.sessions.delete(recipientId);
+    this.creatingSessions.delete(recipientId);
+    this.missingPreKeyRetryAt.delete(recipientId);
     await deleteSessionFromStorage(recipientId);
     console.log(`[E2E SessionManager] Session deleted for ${recipientId}`);
   }
@@ -385,6 +414,8 @@ class SessionManager {
       await this.deleteSession(id);
     }
     this.sessions.clear();
+    this.creatingSessions.clear();
+    this.missingPreKeyRetryAt.clear();
   }
 
   // ─── Session Persistence ────────────────────────────────────────────────
@@ -539,6 +570,16 @@ class SessionManager {
     if (!this.isInitialized) {
       throw new Error('SessionManager not initialized. Call initialize() first.');
     }
+  }
+
+  private isMissingPreKeyRetryPending(recipientId: string): boolean {
+    const retryAt = this.missingPreKeyRetryAt.get(recipientId);
+    if (!retryAt) return false;
+    if (Date.now() >= retryAt) {
+      this.missingPreKeyRetryAt.delete(recipientId);
+      return false;
+    }
+    return true;
   }
 
   /**

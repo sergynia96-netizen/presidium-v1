@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { db } from '@/lib/db';
 import { rateLimit } from '@/lib/rate-limit';
+import { syncUserToRelay } from '@/lib/sync/user-sync';
 import { z } from 'zod';
 
 const updateUserSchema = z.object({
@@ -115,10 +116,20 @@ export async function PATCH(
       );
     }
 
-    const updateData = parseResult.data;
+    const updateData: Record<string, unknown> = { ...parseResult.data };
+    if (parseResult.data.username !== undefined) {
+      updateData.username = parseResult.data.username.replace(/^@+/, '').trim().toLowerCase();
+    }
+    if (parseResult.data.email !== undefined) {
+      updateData.email = parseResult.data.email.trim().toLowerCase();
+    }
+    if (parseResult.data.phone !== undefined) {
+      const normalizedPhone = parseResult.data.phone.replace(/\D/g, '');
+      updateData.phone = normalizedPhone.length > 0 ? normalizedPhone : null;
+    }
 
     // Check if username is taken (if being updated)
-    if (updateData.username) {
+    if (typeof updateData.username === 'string' && updateData.username.length > 0) {
       const existingUser = await db.user.findFirst({
         where: {
           username: updateData.username,
@@ -134,7 +145,7 @@ export async function PATCH(
       }
     }
 
-    if (updateData.email) {
+    if (typeof updateData.email === 'string' && updateData.email.length > 0) {
       const existingEmailUser = await db.user.findFirst({
         where: {
           email: updateData.email,
@@ -167,6 +178,16 @@ export async function PATCH(
         updatedAt: true,
       },
     });
+
+    if (updatedUser.username) {
+      void syncUserToRelay({
+        externalId: updatedUser.id,
+        username: updatedUser.username,
+        email: updatedUser.email,
+        displayName: updatedUser.name,
+        source: 'main-app',
+      }).catch((err) => console.error('[users:update] Relay sync failed:', err));
+    }
 
     return NextResponse.json({ user: updatedUser });
   } catch (error: unknown) {

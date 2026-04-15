@@ -23,6 +23,8 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { useAppStore } from '@/store/use-app-store';
+import { useApiStore } from '@/store/use-api-store';
+import { chatsApi } from '@/lib/api-client';
 import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { TranslationKey } from '@/lib/i18n';
@@ -76,7 +78,8 @@ const MOCK_FILES = [
 
 export default function GlobalSearch() {
   const { t } = useT();
-  const { goBack, setActiveChat, setView } = useAppStore();
+  const { goBack, setActiveChat, setView, chats } = useAppStore();
+  const syncChats = useApiStore((s) => s.syncChats);
 
   const [query, setQuery] = useState('');
   const [activeTab, setActiveTab] = useState('global');
@@ -152,18 +155,72 @@ export default function GlobalSearch() {
   }, [activeTab, query, searchResults]);
 
   const openSearchResult = useCallback(
-    (result: SearchResult) => {
-      const targetChatId =
-        result.chatId ||
-        (result.type === 'chat' || result.type === 'group' || result.type === 'channel' ? result.id : null);
-      if (!targetChatId) return;
-      setActiveChat(targetChatId);
-      setView('chat');
-      if (result.messageId && typeof window !== 'undefined') {
-        window.localStorage.setItem('presidium:jumpToMessageId', result.messageId);
+    async (result: SearchResult) => {
+      // Chat/group/channel — переходим напрямую
+      if (result.type === 'chat' || result.type === 'group' || result.type === 'channel') {
+        const targetChatId = result.chatId || result.id;
+        if (targetChatId) {
+          setActiveChat(targetChatId);
+          setView('chat');
+          if (result.messageId && typeof window !== 'undefined') {
+            window.localStorage.setItem('presidium:jumpToMessageId', result.messageId);
+          }
+        }
+        return;
+      }
+
+      // Message — переходим в чат к сообщению
+      if (result.type === 'message' && result.chatId) {
+        setActiveChat(result.chatId);
+        setView('chat');
+        if (result.messageId && typeof window !== 'undefined') {
+          window.localStorage.setItem('presidium:jumpToMessageId', result.messageId);
+        }
+        return;
+      }
+
+      // Contact — проверяем есть ли чат, создаём если нет
+      if (result.type === 'contact') {
+        const targetUserId = result.id;
+        if (!targetUserId) return;
+
+        // Ищем существующий приватный чат локально по членству.
+        const existingChat = chats.find(
+          (chat) => chat.type === 'private' && Array.isArray(chat.members) && chat.members.includes(targetUserId),
+        );
+        if (existingChat) {
+          setActiveChat(existingChat.id);
+          setView('chat');
+          return;
+        }
+
+        // Создаём новый приватный чат через текущий API-контракт.
+        try {
+          const createRes = await chatsApi.create({
+            name: result.title || 'Direct chat',
+            type: 'private',
+            memberIds: [targetUserId],
+            isEncrypted: true,
+            encryptionType: 'e2e',
+          });
+
+          const createResPayload = createRes as unknown as {
+            chat?: { id?: string };
+            data?: { chat?: { id?: string } };
+          };
+          const newChat = createResPayload.chat || createResPayload.data?.chat;
+          if (newChat?.id) {
+            void syncChats();
+            setActiveChat(newChat.id);
+            setView('chat');
+          }
+        } catch {
+          console.error('[global-search] Failed to create chat for contact:', targetUserId);
+        }
+        return;
       }
     },
-    [setActiveChat, setView],
+    [chats, setActiveChat, setView, syncChats],
   );
 
   const renderSearchResults = useCallback(

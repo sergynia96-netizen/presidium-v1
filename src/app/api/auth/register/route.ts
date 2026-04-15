@@ -3,12 +3,13 @@ import { db } from '@/lib/db';
 import { hashPassword } from '@/lib/auth-utils';
 import { z } from 'zod';
 import { rateLimit } from '@/lib/rate-limit';
+import { syncUserToRelay } from '@/lib/sync/user-sync';
 
 const registerSchema = z.object({
   email: z.string().email('Invalid email address'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
   name: z.string().min(2, 'Name must be at least 2 characters'),
-  username: z.string().min(2, 'Username must be at least 2 characters').optional(),
+  username: z.string().trim().min(2, 'Username must be at least 2 characters').optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -39,7 +40,10 @@ export async function POST(request: NextRequest) {
     }
 
     const email = parseResult.data.email.toLowerCase();
-    const { password, name, username } = parseResult.data;
+    const { password, name } = parseResult.data;
+    const normalizedUsername = parseResult.data.username
+      ? parseResult.data.username.replace(/^@+/, '').toLowerCase()
+      : undefined;
 
     // Check if user already exists
     const existingUser = await db.user.findUnique({
@@ -54,9 +58,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if username is taken (if provided)
-    if (username) {
+    if (normalizedUsername) {
       const existingUsername = await db.user.findUnique({
-        where: { username },
+        where: { username: normalizedUsername },
       });
 
       if (existingUsername) {
@@ -76,7 +80,7 @@ export async function POST(request: NextRequest) {
         email,
         passwordHash,
         name,
-        username: username || null,
+        username: normalizedUsername || null,
         avatar: '',
         status: 'offline',
       },
@@ -89,6 +93,17 @@ export async function POST(request: NextRequest) {
         createdAt: true,
       },
     });
+
+    // Sync user to Relay (non-blocking, fire-and-forget)
+    if (user.username) {
+      syncUserToRelay({
+        externalId: user.id,
+        username: user.username,
+        email: user.email,
+        displayName: user.name,
+        source: 'main-app',
+      }).catch((err) => console.error('[register] Relay sync failed:', err));
+    }
 
     return NextResponse.json(
       {

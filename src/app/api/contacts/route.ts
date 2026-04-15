@@ -182,10 +182,15 @@ export async function POST(request: NextRequest) {
         | null;
 
       if (normalizedUsername) {
-        const usernameCandidates = await db.user.findMany({
+        // Используем findFirst с точным WHERE вместо findMany(take: 200) + JS filter
+        contactUser = await db.user.findFirst({
           where: {
             id: { not: session.user.id },
-            username: { not: null },
+            username: {
+              equals: normalizedUsername,
+              // Для PostgreSQL используем case-insensitive mode; для SQLite — fallback ниже
+              ...(process.env.DATABASE_URL?.includes('postgres') ? { mode: 'insensitive' } : {}),
+            },
           },
           select: {
             id: true,
@@ -194,19 +199,39 @@ export async function POST(request: NextRequest) {
             username: true,
             phone: true,
           },
-          take: 200,
         });
-        contactUser =
-          usernameCandidates.find(
-            (candidate) => (candidate.username || '').toLowerCase() === normalizedUsername,
-          ) || null;
+
+        // Fallback для SQLite: ручной case-insensitive поиск
+        if (!contactUser && !process.env.DATABASE_URL?.includes('postgres')) {
+          const candidates = await db.user.findMany({
+            where: {
+              id: { not: session.user.id },
+              username: { not: null },
+            },
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              username: true,
+              phone: true,
+            },
+          });
+          contactUser =
+            candidates.find(
+              (c) => (c.username || '').toLowerCase() === normalizedUsername,
+            ) || null;
+        }
       }
 
       if (!contactUser && normalizedEmail) {
-        const emailCandidates = await db.user.findMany({
+        // Используем findFirst с точным WHERE вместо findMany(take: 200) + JS filter
+        contactUser = await db.user.findFirst({
           where: {
             id: { not: session.user.id },
-            email: { not: '' },
+            email: {
+              equals: normalizedEmail,
+              ...(process.env.DATABASE_URL?.includes('postgres') ? { mode: 'insensitive' } : {}),
+            },
           },
           select: {
             id: true,
@@ -215,19 +240,36 @@ export async function POST(request: NextRequest) {
             username: true,
             phone: true,
           },
-          take: 200,
         });
-        contactUser =
-          emailCandidates.find(
-            (candidate) => candidate.email.toLowerCase() === normalizedEmail,
-          ) || null;
+
+        // Fallback для SQLite
+        if (!contactUser && !process.env.DATABASE_URL?.includes('postgres')) {
+          const candidates = await db.user.findMany({
+            where: {
+              id: { not: session.user.id },
+              email: { not: '' },
+            },
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              username: true,
+              phone: true,
+            },
+          });
+          contactUser =
+            candidates.find(
+              (c) => c.email.toLowerCase() === normalizedEmail,
+            ) || null;
+        }
       }
 
       if (!contactUser && normalizedPhone) {
-        const phoneCandidates = await db.user.findMany({
+        // Для телефона — используем findFirst с точным WHERE
+        contactUser = await db.user.findFirst({
           where: {
             id: { not: session.user.id },
-            phone: { not: null },
+            phone: normalizedPhone,
           },
           select: {
             id: true,
@@ -236,12 +278,28 @@ export async function POST(request: NextRequest) {
             username: true,
             phone: true,
           },
-          take: 100,
         });
 
-        contactUser =
-          phoneCandidates.find((candidate) => normalizePhone(candidate.phone || '') === normalizedPhone) ||
-          null;
+        // Fallback: ищем кандидатов с не-null телефоном
+        if (!contactUser) {
+          const candidates = await db.user.findMany({
+            where: {
+              id: { not: session.user.id },
+              phone: { not: null },
+            },
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              username: true,
+              phone: true,
+            },
+          });
+          contactUser =
+            candidates.find(
+              (c) => normalizePhone(c.phone || '') === normalizedPhone,
+            ) || null;
+        }
       }
 
       if (!contactUser && normalizedQuery) {
@@ -374,4 +432,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

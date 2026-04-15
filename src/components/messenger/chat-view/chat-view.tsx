@@ -37,6 +37,7 @@ import { MessageInput } from './message-input';
 import type { GIFResult, Sticker } from './stickers-gif-picker';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
+import { useMarkAsRead } from '@/hooks/use-mark-read';
 import {
   OUTBOX_UPDATED_EVENT,
   enqueueOutboxTask,
@@ -240,6 +241,9 @@ export function ChatView() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const activeChatIdRef = useRef<string | null>(activeChatId);
+  const receiveMessageRef = useRef(receiveMessage);
+  const tRef = useRef(t);
   const [showCallScreen, setShowCallScreen] = useState<'audio' | 'video' | null>(null);
   const [showWallpaperPicker, setShowWallpaperPicker] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
@@ -296,6 +300,31 @@ export function ChatView() {
   const chat = useMemo(() => chats.find((c) => c.id === activeChatId), [chats, activeChatId]);
   const forwardTargetChats = useMemo(() => chats.filter((c) => c.id !== activeChatId), [activeChatId, chats]);
   const chatMessages = useMemo(() => (activeChatId ? messages[activeChatId] || [] : []), [messages, activeChatId]);
+  const e2eRecipientId = useMemo(() => {
+    if (!chat || !activeChatId) return null;
+    if (chat.type === 'private') {
+      const members = Array.isArray(chat.members) ? chat.members : [];
+      const peerId = members.find((memberId) => memberId && memberId !== user?.id);
+      return peerId || activeChatId;
+    }
+    return chat.id || activeChatId;
+  }, [chat, activeChatId, user?.id]);
+
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
+
+  useEffect(() => {
+    receiveMessageRef.current = receiveMessage;
+  }, [receiveMessage]);
+
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
+
+  // Auto mark messages as read when chat is opened
+  useMarkAsRead(activeChatId);
+
   const pinnedMessages = useMemo(() => chatMessages.filter((m) => m.isPinned), [chatMessages]);
   const currentPinnedMessage = useMemo(
     () => (pinnedMessages.length > 0 ? pinnedMessages[Math.min(pinnedIndex, pinnedMessages.length - 1)] : null),
@@ -623,14 +652,15 @@ export function ChatView() {
 
         // Set up incoming encrypted message handler
         e2eChat.onIncomingMessage(async (envelope) => {
-          if (!activeChatId) return;
+          const currentChatId = activeChatIdRef.current;
+          if (!currentChatId) return;
 
-          const result = await e2eChat.decryptIncomingMessage(envelope, activeChatId);
+          const result = await e2eChat.decryptIncomingMessage(envelope, currentChatId);
           if (result.success && result.decryptedMessage) {
-            receiveMessage(activeChatId, result.decryptedMessage);
+            receiveMessageRef.current(currentChatId, result.decryptedMessage);
           } else if (result.error) {
             console.error('[ChatView] Failed to decrypt message:', result.error);
-            toast.error(t('chat.decryptFailed'));
+            toast.error(tRef.current('chat.decryptFailed'));
           }
         });
 
@@ -640,7 +670,7 @@ export function ChatView() {
         }
       } catch (error) {
         if (!cancelled) {
-          setE2eError(error instanceof Error ? error.message : t('chat.e2eInitFailed'));
+          setE2eError(error instanceof Error ? error.message : tRef.current('chat.e2eInitFailed'));
           console.error('[ChatView] E2E initialization failed:', error);
         }
       }
@@ -652,17 +682,16 @@ export function ChatView() {
       cancelled = true;
       e2eChat.cleanup();
     };
-  }, [activeChatId, receiveMessage, t]);
+  }, []);
 
   // Ensure E2E session when switching chats
   useEffect(() => {
-    if (!activeChatId || !e2eInitialized) return;
+    if (!activeChatId || !e2eInitialized || !e2eRecipientId) return;
 
     const ensureE2ESession = async () => {
-      const chatState = e2eChat.getChatState(activeChatId);
-      if (!chatState.hasSession && chat) {
-        const recipientId = chat.type === 'private' ? activeChatId : chat.id;
-        const success = await e2eChat.ensureSession(activeChatId, recipientId);
+      const chatState = e2eChat.getChatState(e2eRecipientId);
+      if (!chatState.hasSession) {
+        const success = await e2eChat.ensureSession(activeChatId, e2eRecipientId);
         if (!success) {
           setE2eError(t('chat.e2eSessionFailed'));
         }
@@ -670,7 +699,7 @@ export function ChatView() {
     };
 
     ensureE2ESession();
-  }, [activeChatId, e2eInitialized, chat, t]);
+  }, [activeChatId, e2eInitialized, e2eRecipientId, t]);
 
   const persistMessageStatus = useCallback(
     async (messageId: string, status: 'sending' | 'sent' | 'delivered' | 'read', chatId?: string) => {
@@ -1012,11 +1041,14 @@ export function ChatView() {
 
       if (isE2EChat && e2eInitialized) {
         // E2E encrypted message flow
-        const recipientId = chat?.type === 'private' ? activeChatId : chat?.id || activeChatId;
+        if (!e2eRecipientId) {
+          setE2eError(t('chat.e2eSessionFailed'));
+          return;
+        }
         const e2eResult = await e2eChat.sendEncryptedMessage(
           activeChatId,
           senderContext.id,
-          recipientId,
+          e2eRecipientId,
           content,
         );
 
@@ -1189,6 +1221,7 @@ export function ChatView() {
     [
       activeChatId,
       chat,
+      e2eRecipientId,
       e2eInitialized,
       editMessageContent,
       editingMessage,
@@ -1317,7 +1350,10 @@ export function ChatView() {
         const isE2EChatFallback = chat?.isEncrypted || chat?.encryptionType === 'p2p';
         
         if (isE2EChatFallback && e2eInitialized) {
-          const recipientId = chat?.type === 'private' ? activeChatId : chat?.id || activeChatId;
+          if (!e2eRecipientId) {
+            setE2eError(t('chat.e2eSessionFailed'));
+            return;
+          }
           const e2ePayload = JSON.stringify({
              type: 'media',
              content: previewContent,
@@ -1332,7 +1368,7 @@ export function ChatView() {
                 tag: e2eFileData.tag,
              }
           });
-          await e2eChat.sendEncryptedMessage(activeChatId, senderContext.id, recipientId, e2ePayload);
+          await e2eChat.sendEncryptedMessage(activeChatId, senderContext.id, e2eRecipientId, e2ePayload);
         } else {
           const wsPayload = {
             id: msgId,
@@ -1371,9 +1407,8 @@ export function ChatView() {
     [
       activeChatId,
       chat?.encryptionType,
-      chat?.id,
       chat?.isEncrypted,
-      chat?.type,
+      e2eRecipientId,
       e2eInitialized,
       replyToMessage,
       sendMediaMessage,
@@ -2989,6 +3024,7 @@ export function ChatView() {
 
       <MessageInput
         key={editingMessage ? `edit-${editingMessage.id}` : 'compose'}
+        chatId={activeChatId || undefined}
         onSend={handleSend}
         onToggleAI={toggleAIActions}
         showAI={showAIActions}
@@ -3351,9 +3387,9 @@ export function ChatView() {
       </AnimatePresence>
 
       {/* E2E Safety Number Verification Dialog */}
-      {activeChatId && chat && (
+      {activeChatId && chat && e2eRecipientId && (
         <SafetyNumberVerification
-          contactId={activeChatId}
+          contactId={e2eRecipientId}
           contactName={chat.name}
           isOpen={showSafetyVerification}
           onClose={() => setShowSafetyVerification(false)}
@@ -3366,5 +3402,3 @@ export function ChatView() {
     </div>
   );
 }
-
-

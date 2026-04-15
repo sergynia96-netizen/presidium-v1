@@ -71,6 +71,8 @@ function mapApiChatToAppChat(chat: Chat, currentUserId?: string): AppChat {
     unreadCount: chat.unreadCount ?? 0,
     isPinned: Boolean(chat.isPinned),
     isMuted: Boolean(chat.isMuted),
+    notificationLevel: chat.notificationLevel || (chat.isMuted ? 'muted' : 'all'),
+    isArchived: Boolean(chat.isArchived),
     isEncrypted: chat.isEncrypted ?? true,
     encryptionType: chat.encryptionType || 'e2e',
     role: (chat.role as AppChat['role']) || 'member',

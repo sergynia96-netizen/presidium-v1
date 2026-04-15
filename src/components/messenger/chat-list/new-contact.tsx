@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Loader2, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,7 @@ import { useAppStore } from '@/store/use-app-store';
 import { useApiStore } from '@/store/use-api-store';
 import { chatsApi, contactsApi } from '@/lib/api-client';
 import { useT } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 import type { Contact } from '@/types';
 
 export default function NewContact() {
@@ -27,15 +28,36 @@ export default function NewContact() {
   const [username, setUsername] = useState('');
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [showValidationError, setShowValidationError] = useState(false);
 
+  // Требуется хотя бы один идентификатор: username ИЛИ phone
   const isFormValid = username.trim() !== '' || phone.trim() !== '';
 
+  // Обновляем сообщение об ошибке валидации
+  const updateValidationError = useCallback(() => {
+    if (showValidationError && username.trim() === '' && phone.trim() === '') {
+      setValidationError('Username or phone is required');
+    } else {
+      setValidationError(null);
+    }
+  }, [showValidationError, username, phone]);
+
   const normalizePhone = (value: string): string => value.replace(/\D/g, '');
+
+  // Автоматическая валидация при изменении полей
+  useEffect(() => {
+    updateValidationError();
+  }, [updateValidationError]);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!isFormValid) return;
+      if (!isFormValid) {
+        setShowValidationError(true);
+        updateValidationError();
+        return;
+      }
 
       if (isSubmitting) return;
 
@@ -176,6 +198,7 @@ export default function NewContact() {
       setView,
       syncChats,
       syncContacts,
+      updateValidationError,
       username,
     ],
   );
@@ -261,8 +284,11 @@ export default function NewContact() {
                 placeholder="Email or phone"
                 type="text"
                 autoComplete="email tel"
-                className="h-11"
+                className={cn("h-11", validationError && !phone && "border-destructive focus-visible:ring-destructive")}
               />
+              {validationError && !phone && (
+                <p className="text-xs text-destructive">{validationError}</p>
+              )}
             </div>
 
             <Separator />
@@ -279,7 +305,7 @@ export default function NewContact() {
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="@username"
                 autoComplete="username"
-                className="h-11"
+                className={cn("h-11", validationError && !username && "border-destructive focus-visible:ring-destructive")}
               />
             </div>
           </div>

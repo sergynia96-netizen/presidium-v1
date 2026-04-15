@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
+import { useDraftAutosave } from '@/hooks/use-draft-autosave';
 import type { MessageReplyPreview } from '@/types';
 import { GIFPicker, StickerPicker, type GIFResult, type Sticker } from './stickers-gif-picker';
 
@@ -43,6 +44,7 @@ interface MessageInputProps {
   anonymousAdminEnabled?: boolean;
   anonymousAdminMode?: boolean;
   onToggleAnonymousAdminMode?: () => void;
+  chatId?: string; // For server-side draft autosave
 }
 
 const AI_MENTION_REGEX = /^@ai\s+/i;
@@ -70,9 +72,14 @@ export function MessageInput({
   anonymousAdminEnabled = false,
   anonymousAdminMode = false,
   onToggleAnonymousAdminMode,
+  chatId,
 }: MessageInputProps) {
   const { t, tf } = useT();
   const [text, setText] = useState('');
+
+  // Server-side draft autosave (complements localStorage)
+  useDraftAutosave(chatId || null, text, !disableDraftPersistence && !!chatId && !editMessage);
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const gifPickerRef = useRef<HTMLDivElement>(null);
@@ -137,6 +144,35 @@ export function MessageInput({
 
     setText('');
   }, [disableDraftPersistence, draftStorageKey, editMessage, initialText]);
+
+  useEffect(() => {
+    if (!chatId || disableDraftPersistence || editMessage || initialText) return;
+    if (typeof window === 'undefined') return;
+
+    const localDraft = draftStorageKey ? window.localStorage.getItem(draftStorageKey) || '' : '';
+    if (localDraft.trim().length > 0) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/chats/${chatId}/draft`);
+        if (!response.ok) return;
+        const payload = (await response.json()) as { content?: string | null };
+        const serverDraft = typeof payload.content === 'string' ? payload.content : '';
+        if (!serverDraft.trim() || cancelled) return;
+        setText(serverDraft);
+        if (draftStorageKey) {
+          window.localStorage.setItem(draftStorageKey, serverDraft);
+        }
+      } catch {
+        // Ignore draft bootstrap errors; local input remains usable.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [chatId, disableDraftPersistence, draftStorageKey, editMessage, initialText]);
 
   const handleSend = useCallback(() => {
     if (!hasText) return;

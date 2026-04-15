@@ -145,6 +145,8 @@ export interface Chat {
   unreadCount?: number;
   isPinned?: boolean;
   isMuted?: boolean;
+  notificationLevel?: 'all' | 'mentions' | 'muted';
+  isArchived?: boolean;
   isEncrypted?: boolean;
   encryptionType?: 'e2e' | 'p2p' | 'server';
   members?: User[];
