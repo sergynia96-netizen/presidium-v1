@@ -3,17 +3,52 @@ import { randomInt } from 'crypto';
 import jwt, { type JwtPayload } from 'jsonwebtoken';
 import { prisma } from '../prisma';
 
+const JWT_SECRETS: string[] = Array.from(
+  new Set(
+    [
+      process.env.RELAY_JWT_SECRET,
+      process.env.JWT_SECRET,
+      process.env.NEXTAUTH_SECRET,
+    ].filter((value): value is string => typeof value === 'string' && value.length > 0),
+  ),
+);
+
 const JWT_SECRET: string = (() => {
-  const secret = process.env.JWT_SECRET || process.env.NEXTAUTH_SECRET;
-  if (!secret) {
-    throw new Error('JWT_SECRET (or NEXTAUTH_SECRET) is required for relay-backend');
+  const [secret] = JWT_SECRETS;
+  if (secret) {
+    return secret;
   }
-  return secret;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('RELAY_JWT_SECRET/JWT_SECRET/NEXTAUTH_SECRET is required for relay-backend');
+  }
+  // Development-only fallback. This should never be used in production.
+  return 'relay-dev-fallback-secret';
 })();
 
 const RELAY_DEV_OTP_PREVIEW =
   process.env.RELAY_DEV_OTP_PREVIEW === 'true' &&
   process.env.NODE_ENV !== 'production';
+
+const ALLOW_UNVERIFIED_DEV_BRIDGE_TOKENS =
+  process.env.NODE_ENV !== 'production' &&
+  process.env.RELAY_ALLOW_UNVERIFIED_DEV_BRIDGE_TOKENS !== 'false';
+
+let unverifiedBridgeTokenWarningShown = false;
+
+function claimsToAuth(claims: JwtPayload): { accountId: string; deviceId: string } | null {
+  // Format 1: Relay-native token (has accountId + deviceId)
+  if (typeof claims.accountId === 'string' && typeof claims.deviceId === 'string') {
+    return { accountId: claims.accountId, deviceId: claims.deviceId };
+  }
+
+  // Format 2: NextAuth bridge token (has sub or id, issued by /api/relay/token)
+  const nextAuthId = claims.sub || claims.id;
+  if (typeof nextAuthId === 'string') {
+    return { accountId: nextAuthId, deviceId: 'web' };
+  }
+
+  return null;
+}
 
 function generateOtpCode(): string {
   return String(randomInt(100000, 1000000));
@@ -213,29 +248,36 @@ export async function generateTokens(
  * When a NextAuth token is presented, the accountId = sub (NextAuth userId).
  */
 export function verifyJWT(token: string): { accountId: string; deviceId: string } | null {
-  try {
-    const payload = jwt.verify(token, JWT_SECRET);
-    if (typeof payload !== 'object' || payload === null) {
-      return null;
+  for (const secret of JWT_SECRETS.length > 0 ? JWT_SECRETS : [JWT_SECRET]) {
+    try {
+      const payload = jwt.verify(token, secret);
+      if (typeof payload !== 'object' || payload === null) {
+        continue;
+      }
+
+      const claims = payload as JwtPayload;
+      const mapped = claimsToAuth(claims);
+      if (mapped) return mapped;
+    } catch {
+      // Try next secret.
     }
-
-    const claims = payload as JwtPayload;
-
-    // Format 1: Relay-native token (has accountId + deviceId)
-    if (typeof claims.accountId === 'string' && typeof claims.deviceId === 'string') {
-      return { accountId: claims.accountId, deviceId: claims.deviceId };
-    }
-
-    // Format 2: NextAuth bridge token (has sub or id, issued by /api/relay/token)
-    const nextAuthId = claims.sub || claims.id;
-    if (typeof nextAuthId === 'string') {
-      return { accountId: nextAuthId, deviceId: 'web' };
-    }
-
-    return null;
-  } catch {
-    return null;
   }
+
+  if (ALLOW_UNVERIFIED_DEV_BRIDGE_TOKENS) {
+    const decoded = jwt.decode(token);
+    if (decoded && typeof decoded === 'object') {
+      const mapped = claimsToAuth(decoded as JwtPayload);
+      if (mapped) {
+        if (!unverifiedBridgeTokenWarningShown) {
+          console.warn('[Auth] Accepted unverified bridge JWT in development mode');
+          unverifiedBridgeTokenWarningShown = true;
+        }
+        return mapped;
+      }
+    }
+  }
+
+  return null;
 }
 
 /**

@@ -68,6 +68,10 @@ export async function getPreKeyBundle(targetAccountId: string): Promise<KeyBundl
     return { error: 'User not found' };
   }
 
+  if (!account.publicKey || account.publicKey.length === 0) {
+    return { error: 'No identity key available' };
+  }
+
   // Get signed pre-key
   const signedPreKey = await prisma.preKeyBundle.findFirst({
     where: { accountId: targetAccountId, preKeyId: 0, isUsed: false },

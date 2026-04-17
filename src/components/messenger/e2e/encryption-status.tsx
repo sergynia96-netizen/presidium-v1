@@ -74,22 +74,35 @@ export function EncryptionStatusBadge({
   className = '',
 }: EncryptionStatusBadgeProps) {
   const config = STATUS_CONFIG[status];
+  const interactive = typeof onClick === 'function';
 
   return (
-    <button
+    <span
       onClick={onClick}
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onKeyDown={
+        interactive
+          ? (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
       className={`
         inline-flex items-center gap-1.5 px-2 py-1 rounded-full
         text-xs font-medium transition-all duration-200
         border ${config.bgColor} ${config.color} ${config.borderColor}
-        hover:opacity-80 cursor-pointer
+        ${interactive ? 'hover:opacity-80 cursor-pointer' : ''}
         ${className}
       `}
       title={config.label}
     >
       {config.icon}
       <span className="hidden sm:inline">{config.label}</span>
-    </button>
+    </span>
   );
 }
 

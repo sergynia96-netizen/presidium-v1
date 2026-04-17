@@ -1,5 +1,14 @@
 'use client';
 
+/*
+ * CHANGELOG (Codex)
+ * 2026-04-17:
+ * - Wired ChatView E2E lifecycle to E2EProvider context instead of local duplicate init path.
+ * - Added safer E2E recipient resolution for private chats only.
+ * - Replaced header nested interactive structure (button-in-button risk) with accessible div role="button".
+ * - Added guarded E2E session ensure calls to reduce retry/noise during relay auth failures.
+ */
+
 import { useEffect, useRef, useMemo, useCallback, useState, type CSSProperties } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -54,6 +63,7 @@ import {
 import type { RelayQueueDeliveredDetail } from '@/lib/realtime-events';
 import { e2eChat } from '@/lib/crypto/chat-integration';
 import { EncryptionStatusBadge, EncryptionNotice, SafetyNumberVerification, E2EInitializationBanner, E2EErrorBanner } from '@/components/messenger/e2e';
+import { useE2EContext } from '@/components/providers/e2e-provider';
 import { encryptMediaFile } from '@/lib/media';
 import { runLocalOpenClaw } from '@/lib/openclaw';
 import { bytesToBase64 } from '@/lib/crypto/utils';
@@ -193,6 +203,12 @@ function getMessageTimestampMs(message: Message): number | null {
 
 export function ChatView() {
   const { t, tf } = useT();
+  const {
+    isInitialized: e2eProviderInitialized,
+    error: e2eProviderError,
+    onIncomingEncryptedMessage,
+    reconnect: reconnectE2E,
+  } = useE2EContext();
 
   const AI_SUGGESTION_CHIPS = [t('ai.summarize'), t('ai.translate'), t('ai.replyForMe'), t('ai.createTask')];
 
@@ -301,14 +317,11 @@ export function ChatView() {
   const forwardTargetChats = useMemo(() => chats.filter((c) => c.id !== activeChatId), [activeChatId, chats]);
   const chatMessages = useMemo(() => (activeChatId ? messages[activeChatId] || [] : []), [messages, activeChatId]);
   const e2eRecipientId = useMemo(() => {
-    if (!chat || !activeChatId) return null;
-    if (chat.type === 'private') {
-      const members = Array.isArray(chat.members) ? chat.members : [];
-      const peerId = members.find((memberId) => memberId && memberId !== user?.id);
-      return peerId || activeChatId;
-    }
-    return chat.id || activeChatId;
-  }, [chat, activeChatId, user?.id]);
+    if (!chat || chat.type !== 'private') return null;
+    const members = Array.isArray(chat.members) ? chat.members : [];
+    const peerId = members.find((memberId) => memberId && memberId !== user?.id);
+    return peerId || null;
+  }, [chat, user?.id]);
 
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
@@ -642,47 +655,41 @@ export function ChatView() {
     };
   }, []);
 
-  // E2E initialization
   useEffect(() => {
-    let cancelled = false;
+    if (!user?.id) {
+      setE2eInitialized(false);
+      setE2eError(null);
+      return;
+    }
 
-    const initE2E = async () => {
-      try {
-        await e2eChat.initialize();
+    setE2eInitialized(e2eProviderInitialized);
+    if (e2eProviderError) {
+      setE2eError(e2eProviderError);
+    } else if (e2eProviderInitialized) {
+      setE2eError(null);
+    }
+  }, [e2eProviderError, e2eProviderInitialized, user?.id]);
 
-        // Set up incoming encrypted message handler
-        e2eChat.onIncomingMessage(async (envelope) => {
-          const currentChatId = activeChatIdRef.current;
-          if (!currentChatId) return;
+  useEffect(() => {
+    if (!user?.id) return;
 
-          const result = await e2eChat.decryptIncomingMessage(envelope, currentChatId);
-          if (result.success && result.decryptedMessage) {
-            receiveMessageRef.current(currentChatId, result.decryptedMessage);
-          } else if (result.error) {
-            console.error('[ChatView] Failed to decrypt message:', result.error);
-            toast.error(tRef.current('chat.decryptFailed'));
-          }
-        });
+    const unsubscribeIncoming = onIncomingEncryptedMessage(async (envelope) => {
+      const currentChatId = activeChatIdRef.current;
+      if (!currentChatId) return;
 
-        if (!cancelled) {
-          setE2eInitialized(true);
-          setE2eError(null);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setE2eError(error instanceof Error ? error.message : tRef.current('chat.e2eInitFailed'));
-          console.error('[ChatView] E2E initialization failed:', error);
-        }
+      const result = await e2eChat.decryptIncomingMessage(envelope, currentChatId);
+      if (result.success && result.decryptedMessage) {
+        receiveMessageRef.current(currentChatId, result.decryptedMessage);
+      } else if (result.error) {
+        console.error('[ChatView] Failed to decrypt message:', result.error);
+        toast.error(tRef.current('chat.decryptFailed'));
       }
-    };
-
-    initE2E();
+    });
 
     return () => {
-      cancelled = true;
-      e2eChat.cleanup();
+      unsubscribeIncoming();
     };
-  }, []);
+  }, [onIncomingEncryptedMessage, user?.id]);
 
   // Ensure E2E session when switching chats
   useEffect(() => {
@@ -693,13 +700,13 @@ export function ChatView() {
       if (!chatState.hasSession) {
         const success = await e2eChat.ensureSession(activeChatId, e2eRecipientId);
         if (!success) {
-          setE2eError(t('chat.e2eSessionFailed'));
+          setE2eError(tRef.current('chat.e2eSessionFailed'));
         }
       }
     };
 
-    ensureE2ESession();
-  }, [activeChatId, e2eInitialized, e2eRecipientId, t]);
+    void ensureE2ESession();
+  }, [activeChatId, e2eInitialized, e2eRecipientId]);
 
   const persistMessageStatus = useCallback(
     async (messageId: string, status: 'sending' | 'sent' | 'delivered' | 'read', chatId?: string) => {
@@ -923,7 +930,7 @@ export function ChatView() {
       if (editingMessage) {
         const nextContent = content.trim();
         if (!nextContent) return;
-        const isE2EChat = chat?.isEncrypted;
+        const isE2EChat = Boolean(chat?.type === 'private' && chat?.isEncrypted);
         const moderated = await moderateBeforeSend(nextContent, isE2EChat);
         if (moderated.blocked || !moderated.result.isSafe) {
           toast.error(t('moderation.messageFlagged'));
@@ -1016,7 +1023,11 @@ export function ChatView() {
       const quoteSegment = replyToMessage?.quoteSegment;
 
       // Check if this chat uses E2E encryption
-      const isE2EChat = Boolean(chat?.isEncrypted || chat?.encryptionType === 'p2p');
+      const isE2EChat = Boolean(
+        chat?.type === 'private' &&
+          (chat?.isEncrypted || chat?.encryptionType === 'p2p') &&
+          e2eRecipientId,
+      );
 
       // Chat E2E state is already extracted above
       const moderated = await moderateBeforeSend(content, isE2EChat);
@@ -1039,12 +1050,8 @@ export function ChatView() {
 
       const msgId = crypto.randomUUID();
 
-      if (isE2EChat && e2eInitialized) {
+      if (isE2EChat && e2eInitialized && e2eRecipientId) {
         // E2E encrypted message flow
-        if (!e2eRecipientId) {
-          setE2eError(t('chat.e2eSessionFailed'));
-          return;
-        }
         const e2eResult = await e2eChat.sendEncryptedMessage(
           activeChatId,
           senderContext.id,
@@ -1261,7 +1268,11 @@ export function ChatView() {
         : undefined;
 
       try {
-        const isE2EChat = chat?.isEncrypted || chat?.encryptionType === 'p2p';
+        const isE2EChat = Boolean(
+          chat?.type === 'private' &&
+            (chat?.isEncrypted || chat?.encryptionType === 'p2p') &&
+            e2eRecipientId,
+        );
         let fileToUpload: Blob | File = file;
         let e2eFileData: { key?: string; iv?: string; tag?: string } = {};
 
@@ -1347,13 +1358,7 @@ export function ChatView() {
           });
         }
 
-        const isE2EChatFallback = chat?.isEncrypted || chat?.encryptionType === 'p2p';
-        
-        if (isE2EChatFallback && e2eInitialized) {
-          if (!e2eRecipientId) {
-            setE2eError(t('chat.e2eSessionFailed'));
-            return;
-          }
+        if (isE2EChat && e2eInitialized && e2eRecipientId) {
           const e2ePayload = JSON.stringify({
              type: 'media',
              content: previewContent,
@@ -1408,6 +1413,7 @@ export function ChatView() {
       activeChatId,
       chat?.encryptionType,
       chat?.isEncrypted,
+      chat?.type,
       e2eRecipientId,
       e2eInitialized,
       replyToMessage,
@@ -2448,6 +2454,7 @@ export function ChatView() {
   const showOutgoingStatusLabel = rawChatType === 'group' || rawChatType === 'channel';
   const isEncrypted = chat.isEncrypted;
   const encryptionType = chat.encryptionType;
+  const supportsDirectE2E = isEncrypted && chat.type === 'private' && Boolean(e2eRecipientId);
   const relayStatusText = !wsConnected
     ? outboxSize > 0
       ? tf('outbox.waitingConnection', { count: outboxSize })
@@ -2479,10 +2486,17 @@ export function ChatView() {
           <ArrowLeft className="size-5" />
         </Button>
 
-        <button
-          type="button"
+        <div
+          role="button"
+          tabIndex={0}
           className="flex min-w-0 flex-1 items-center gap-3 text-left"
           onClick={handleAvatarClick}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              handleAvatarClick();
+            }
+          }}
         >
           <Avatar className="size-10">
             <AvatarFallback
@@ -2498,13 +2512,13 @@ export function ChatView() {
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h2 className="truncate text-sm font-semibold">{chat.name}</h2>
-              {e2eInitialized && (
+              {supportsDirectE2E && e2eInitialized && (
                 <EncryptionStatusBadge
                   status={e2eVerified ? 'verified' : e2eError ? 'error' : 'encrypted'}
-                  onClick={() => setShowSafetyVerification(true)}
+                  onClick={e2eRecipientId ? () => setShowSafetyVerification(true) : undefined}
                 />
               )}
-              {!e2eInitialized && isEncrypted && encryptionType && (
+              {isEncrypted && encryptionType && (!supportsDirectE2E || !e2eInitialized) && (
                 <span className="flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground">
                   {encryptionType === 'p2p' ? (
                     <>
@@ -2548,7 +2562,7 @@ export function ChatView() {
               )}
             </div>
           </div>
-        </button>
+        </div>
 
         <div className="flex shrink-0 items-center gap-1">
           <Button
@@ -2810,18 +2824,17 @@ export function ChatView() {
       <ScrollArea className="presidium-scroll flex-1" ref={scrollRef} style={wallpaperStyle}>
         <div className="mx-auto flex flex-col gap-1 px-4 py-3 lg:max-w-3xl">
           {/* E2E Initialization Banner */}
-          {activeChatId && isEncrypted && !e2eInitialized && (
+          {activeChatId && supportsDirectE2E && !e2eInitialized && (
             <E2EInitializationBanner />
           )}
 
           {/* E2E Error Banner */}
-          {activeChatId && isEncrypted && e2eError && (
+          {activeChatId && supportsDirectE2E && e2eError && (
             <E2EErrorBanner
               onRetry={async () => {
                 setE2eError(null);
                 try {
-                  await e2eChat.initialize();
-                  setE2eInitialized(true);
+                  await reconnectE2E();
                 } catch {
                   setE2eError(t('chat.e2eReinitFailed'));
                 }
@@ -2830,7 +2843,7 @@ export function ChatView() {
           )}
 
           {/* E2E Encryption Notice */}
-          {activeChatId && isEncrypted && e2eInitialized && !e2eError && chatMessages.length === 0 && (
+          {activeChatId && supportsDirectE2E && e2eInitialized && !e2eError && chatMessages.length === 0 && (
             <EncryptionNotice
               recipientName={chat?.name || ''}
               isVerified={e2eVerified}

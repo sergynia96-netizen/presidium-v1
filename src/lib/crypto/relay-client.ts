@@ -17,6 +17,15 @@
  * - Message queue for offline delivery
  */
 
+/*
+ * CHANGELOG (Codex)
+ * 2026-04-17:
+ * - Added stronger auth backoff and auth-error classification.
+ * - Added cooldown on `/api/relay/token` auth failures (401/403) to stop retry storms.
+ * - Prevented endless reconnect loops when token/auth is invalid.
+ * - Kept reconnect reset only after explicit relay `connected` auth confirmation.
+ */
+
 import { clearRelayAccessToken, getRelayAccessToken, setRelayAccessToken } from '../relay-auth';
 import type { PreKeyBundle, SerializedPreKeyBundle } from './prekeys';
 import { serializePreKeyBundle, deserializePreKeyBundle } from './prekeys';
@@ -106,6 +115,12 @@ const DEFAULT_CONFIG: RelayConfig = {
   pingIntervalMs: 30000,
   pongTimeoutMs: 10000,
 };
+const AUTH_RETRY_BACKOFF_MS = 120_000;
+const AUTH_HANDSHAKE_TIMEOUT_MS = 10_000;
+
+function isAuthRelatedMessage(message: string): boolean {
+  return /401|403|unauthorized|forbidden|auth|token/i.test(message);
+}
 
 function resolveRelayWebSocketUrl(baseUrl: string): string {
   const trimmed = baseUrl.replace(/\/+$/, '');
@@ -139,9 +154,47 @@ class RelayE2EClient {
   private isConnected = false;
   private isConnecting = false;
   private pendingMessages = new Map<string, { envelope: EncryptedEnvelope; resolve: () => void; reject: (error: Error) => void }>();
+  private authRetryAt = 0;
+  private pendingConnectResolver: (() => void) | null = null;
+  private pendingConnectRejecter: ((error: Error) => void) | null = null;
+  private authHandshakeTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(config: Partial<RelayConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+
+  private isAuthRetryPending(): boolean {
+    return this.authRetryAt > Date.now();
+  }
+
+  private activateAuthRetryBackoff(): void {
+    this.authRetryAt = Date.now() + AUTH_RETRY_BACKOFF_MS;
+  }
+
+  private clearAuthRetryBackoff(): void {
+    this.authRetryAt = 0;
+  }
+
+  private clearAuthHandshakeTimer(): void {
+    if (!this.authHandshakeTimer) return;
+    clearTimeout(this.authHandshakeTimer);
+    this.authHandshakeTimer = null;
+  }
+
+  private resolvePendingConnect(): void {
+    const resolve = this.pendingConnectResolver;
+    this.pendingConnectResolver = null;
+    this.pendingConnectRejecter = null;
+    this.clearAuthHandshakeTimer();
+    if (resolve) resolve();
+  }
+
+  private rejectPendingConnect(error: Error): void {
+    const reject = this.pendingConnectRejecter;
+    this.pendingConnectResolver = null;
+    this.pendingConnectRejecter = null;
+    this.clearAuthHandshakeTimer();
+    if (reject) reject(error);
   }
 
   private isJwtExpired(token: string): boolean {
@@ -179,6 +232,10 @@ class RelayE2EClient {
     });
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        this.activateAuthRetryBackoff();
+        clearRelayAccessToken();
+      }
       throw new Error(`Failed to get relay token (${response.status})`);
     }
 
@@ -196,7 +253,20 @@ class RelayE2EClient {
     input: string,
     init: RequestInit = {},
   ): Promise<Response> {
-    const token = await this.ensureRelayToken();
+    if (this.isAuthRetryPending()) {
+      throw new Error('Relay auth is temporarily blocked after recent unauthorized response');
+    }
+
+    let token: string;
+    try {
+      token = await this.ensureRelayToken();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (isAuthRelatedMessage(message)) {
+        this.activateAuthRetryBackoff();
+      }
+      throw error;
+    }
     const headers = new Headers(init.headers || {});
     headers.set('Authorization', `Bearer ${token}`);
 
@@ -206,6 +276,7 @@ class RelayE2EClient {
     });
 
     if (response.status !== 401) {
+      this.clearAuthRetryBackoff();
       return response;
     }
 
@@ -220,6 +291,12 @@ class RelayE2EClient {
       headers: retryHeaders,
     });
 
+    if (response.status === 401) {
+      this.activateAuthRetryBackoff();
+    } else {
+      this.clearAuthRetryBackoff();
+    }
+
     return response;
   }
 
@@ -231,55 +308,84 @@ class RelayE2EClient {
   connect(): Promise<void> {
     if (this.isConnected) return Promise.resolve();
     if (this.isConnecting) return this.waitForConnection();
+    if (this.isAuthRetryPending()) {
+      return Promise.reject(new Error('Relay auth is temporarily blocked after recent unauthorized response'));
+    }
 
     this.isConnecting = true;
 
     return new Promise((resolve, reject) => {
+      this.pendingConnectResolver = resolve;
+      this.pendingConnectRejecter = reject;
+
       try {
         const wsUrl = resolveRelayWebSocketUrl(this.config.wsBaseUrl);
         void (async () => {
-          const token = await this.ensureRelayToken();
+          let token: string;
+          try {
+            token = await this.ensureRelayToken();
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (isAuthRelatedMessage(message)) {
+              this.activateAuthRetryBackoff();
+              this.reconnectAttempts = this.config.maxReconnectAttempts;
+            }
+            throw error;
+          }
           console.log(`[RelayE2EClient] Token: ${token ? `present (${token.length} chars)` : 'missing'}`);
 
           this.ws = new WebSocket(wsUrl);
 
           this.ws.onopen = () => {
-            this.isConnected = true;
-            this.isConnecting = false;
-            this.reconnectAttempts = 0;
             console.log(`[RelayE2EClient] Connected to ${wsUrl}`);
 
             // Authenticate (relay expects payload.token)
-            this.ws!.send(JSON.stringify({ type: 'auth', payload: { token } }));
+            try {
+              this.ws!.send(JSON.stringify({ type: 'auth', payload: { token } }));
+            } catch (error) {
+              this.isConnecting = false;
+              this.rejectPendingConnect(
+                error instanceof Error ? error : new Error('Failed to send relay auth payload'),
+              );
+              this.ws?.close(4001, 'Authentication payload failed');
+              return;
+            }
 
-            // Start ping
-            this.startPing();
-
-            this.emit({ type: 'connected' });
-            resolve();
+            // Do not mark connected yet. We wait for relay auth confirmation (`type: connected`).
+            this.clearAuthHandshakeTimer();
+            this.authHandshakeTimer = setTimeout(() => {
+              this.isConnecting = false;
+              this.rejectPendingConnect(new Error('Relay auth handshake timed out'));
+              this.ws?.close(4001, 'Authentication timeout');
+            }, AUTH_HANDSHAKE_TIMEOUT_MS);
           };
 
           this.ws.onclose = (event) => {
             this.isConnected = false;
             this.isConnecting = false;
             this.stopPing();
+            this.rejectPendingConnect(new Error(event.reason || `Connection closed (${event.code})`));
 
             if (event.code === 4001 || event.code === 4002) {
               clearRelayAccessToken();
+              // Auth/token failures should not loop reconnect forever.
+              this.activateAuthRetryBackoff();
+              this.reconnectAttempts = this.config.maxReconnectAttempts;
             }
 
             this.emit({ type: 'disconnected', reason: event.reason || 'Connection closed' });
 
             // Attempt reconnection
-            if (this.reconnectAttempts < this.config.maxReconnectAttempts) {
+            if (!this.isAuthRetryPending() && this.reconnectAttempts < this.config.maxReconnectAttempts) {
               this.scheduleReconnect();
             }
           };
 
-          this.ws.onerror = (error) => {
+          this.ws.onerror = (_event) => {
             this.isConnecting = false;
-            this.emit({ type: 'error', error: new Error('WebSocket error') });
-            reject(error);
+            const wsError = new Error('WebSocket error');
+            this.emit({ type: 'error', error: wsError });
+            this.rejectPendingConnect(wsError);
           };
 
           this.ws.onmessage = (event) => {
@@ -287,11 +393,11 @@ class RelayE2EClient {
           };
         })().catch((error) => {
           this.isConnecting = false;
-          reject(error);
+          this.rejectPendingConnect(error instanceof Error ? error : new Error(String(error)));
         });
       } catch (error) {
         this.isConnecting = false;
-        reject(error);
+        this.rejectPendingConnect(error instanceof Error ? error : new Error(String(error)));
       }
     });
   }
@@ -301,6 +407,7 @@ class RelayE2EClient {
    */
   disconnect(): void {
     this.stopPing();
+    this.rejectPendingConnect(new Error('Client disconnect'));
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -320,10 +427,20 @@ class RelayE2EClient {
    * Wait for connection to be established.
    */
   private waitForConnection(): Promise<void> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
+      const startedAt = Date.now();
       const check = () => {
         if (this.isConnected) {
           resolve();
+          return;
+        }
+        if (!this.isConnecting) {
+          reject(new Error('Relay connection attempt failed'));
+          return;
+        }
+        if (Date.now() - startedAt > AUTH_HANDSHAKE_TIMEOUT_MS + 5000) {
+          reject(new Error('Timed out waiting for relay connection'));
+          return;
         } else {
           setTimeout(check, 100);
         }
@@ -419,7 +536,14 @@ class RelayE2EClient {
           break;
 
         case 'connected':
-          // Already handled in onopen
+          // Reset reconnect attempts only after successful relay auth.
+          this.isConnected = true;
+          this.isConnecting = false;
+          this.reconnectAttempts = 0;
+          this.clearAuthRetryBackoff();
+          this.startPing();
+          this.resolvePendingConnect();
+          this.emit({ type: 'connected' });
           console.log('[RelayE2EClient] Auth response:', JSON.stringify(parsed));
           break;
 
@@ -434,6 +558,13 @@ class RelayE2EClient {
 
           if (errorCode === 'auth_required' || /auth|token|unauthorized/i.test(String(errorMessage))) {
             clearRelayAccessToken();
+            // Stop auto-reconnect storm when relay auth is invalid.
+            this.activateAuthRetryBackoff();
+            this.reconnectAttempts = this.config.maxReconnectAttempts;
+            this.isConnected = false;
+            this.isConnecting = false;
+            this.rejectPendingConnect(new Error(String(errorMessage)));
+            this.ws?.close(4001, 'Authentication failed');
           }
 
           this.emit({ type: 'error', error: new Error(String(errorMessage)) });

@@ -10,6 +10,15 @@
 
 'use client';
 
+/*
+ * CHANGELOG (Codex)
+ * 2026-04-17:
+ * - Added pre-key upload cooldown for auth-related failures.
+ * - Changed incoming encrypted message subscription signature to return unsubscribe.
+ * - Goal: reduce repeated failing relay calls and keep subscription lifecycle explicit.
+ * - Synced provider connection flags with authenticated relay status to avoid false-ready UI state.
+ */
+
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { useSession } from 'next-auth/react';
 import { sessionManager } from '@/lib/crypto/session-manager';
@@ -36,7 +45,7 @@ interface E2EContextValue {
   isRelayConnected: boolean;
   error: string | null;
   sessionCount: number;
-  onIncomingEncryptedMessage: (handler: (envelope: EncryptedEnvelope) => void) => void;
+  onIncomingEncryptedMessage: (handler: (envelope: EncryptedEnvelope) => void) => () => void;
   reconnect: () => Promise<void>;
 }
 
@@ -72,6 +81,7 @@ export function E2EProvider({ children, enabled = true }: E2EProviderProps) {
 
   const incomingHandlersRef = useRef(new Set<(envelope: EncryptedEnvelope) => void>());
   const unsubscribeRef = useRef<(() => void) | null>(null);
+  const preKeyUploadBlockedUntilRef = useRef(0);
 
   // Register handler for incoming encrypted messages
   const onIncomingEncryptedMessage = useCallback((handler: (envelope: EncryptedEnvelope) => void) => {
@@ -162,6 +172,22 @@ export function E2EProvider({ children, enabled = true }: E2EProviderProps) {
 
         if (cancelled) return;
 
+        // Publish our pre-key bundle so peers can establish sessions.
+        const localPreKeys = sessionManager.getLocalPreKeys();
+        if (localPreKeys && Date.now() >= preKeyUploadBlockedUntilRef.current) {
+          try {
+            await relayClient.uploadPreKeyBundle(localPreKeys);
+          } catch (uploadError) {
+            const uploadMessage = uploadError instanceof Error ? uploadError.message : String(uploadError);
+            if (/401|403|unauthorized|forbidden|auth is temporarily blocked/i.test(uploadMessage)) {
+              preKeyUploadBlockedUntilRef.current = Date.now() + 60_000;
+            }
+            console.warn('[E2EProvider] Failed to upload pre-key bundle:', uploadError);
+          }
+        }
+
+        if (cancelled) return;
+
         // Set up relay event handler
         unsubscribeRef.current = relayClient.on((event: RelayEvent) => {
           if (event.type === 'message') {
@@ -180,7 +206,7 @@ export function E2EProvider({ children, enabled = true }: E2EProviderProps) {
 
         if (!cancelled) {
           setE2eReady(true);
-          setIsRelayConnected(true);
+          setIsRelayConnected(relayClient.connected);
           setSessionCount(sessionManager.getAllSessions().size);
         }
       } catch (err) {

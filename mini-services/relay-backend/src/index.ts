@@ -348,10 +348,21 @@ const server = createServer(async (req, res) => {
       if (!auth) return send(res, 401, { error: 'Unauthorized' });
 
       const body = await json<PreKeyUploadBody>(req);
+      const signedPreKey = typeof body.signedPreKey === 'string' ? body.signedPreKey : '';
+      const oneTimePreKeys = Array.isArray(body.oneTimePreKeys)
+        ? body.oneTimePreKeys.filter((key): key is string => typeof key === 'string' && key.length > 0)
+        : [];
+
+      if (!signedPreKey) {
+        return send(res, 400, { error: 'signedPreKey is required' });
+      }
+
+      // Defensive account provisioning for NextAuth bridge users.
+      await authService.ensureAccountExists(auth.accountId);
 
       // Update identity key on Account if provided (needed for NextAuth bridge users)
-      if (body.identityKey) {
-        await prisma.account.update({
+      if (typeof body.identityKey === 'string' && body.identityKey.length > 0) {
+        await prisma.account.updateMany({
           where: { id: auth.accountId },
           data: { publicKey: body.identityKey },
         });
@@ -359,8 +370,8 @@ const server = createServer(async (req, res) => {
 
       const result = await keyBundleService.uploadPreKeys(
         auth.accountId,
-        body.signedPreKey,
-        body.oneTimePreKeys || [],
+        signedPreKey,
+        oneTimePreKeys,
         body.signature,
       );
       return send(res, 200, result);

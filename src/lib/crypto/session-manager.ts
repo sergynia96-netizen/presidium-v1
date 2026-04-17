@@ -87,6 +87,7 @@ const MAX_FAILED_ATTEMPTS = 3;
 const SESSION_TIMEOUT_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const AUTO_SAVE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 const MISSING_PREKEY_RETRY_MS = 30 * 1000; // 30 seconds
+const RELAY_UNAUTHORIZED_RETRY_MS = 60 * 1000; // 1 minute
 
 // ─── Session Store ───────────────────────────────────────────────────────────
 
@@ -98,6 +99,7 @@ class SessionManager {
   private localPreKeys: LocalPreKeyBundle | null = null;
   private creatingSessions = new Map<string, Promise<E2ESession>>();
   private missingPreKeyRetryAt = new Map<string, number>();
+  private relayAuthRetryAt = 0;
 
   // ─── Initialization ─────────────────────────────────────────────────────
 
@@ -217,6 +219,11 @@ class SessionManager {
     // Back off after a known "missing pre-key bundle" state to avoid 404 spam.
     if (!options.forceRefresh && this.isMissingPreKeyRetryPending(recipientId)) {
       throw new Error(`No pre-key bundle available for ${recipientId}`);
+    }
+
+    // Back off after relay auth failures to avoid 401 request storms.
+    if (!options.forceRefresh && this.isRelayAuthRetryPending()) {
+      throw new Error('Relay authorization temporarily unavailable');
     }
 
     const creationPromise = this.createSession(recipientId)
@@ -557,8 +564,19 @@ class SessionManager {
    */
   private async fetchRemotePreKeyBundle(recipientId: string): Promise<PreKeyBundle | null> {
     try {
-      return await relayClient.fetchPreKeyBundle(recipientId);
+      if (this.isRelayAuthRetryPending()) {
+        return null;
+      }
+      const bundle = await relayClient.fetchPreKeyBundle(recipientId);
+      this.relayAuthRetryAt = 0;
+      return bundle;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/401|unauthorized/i.test(message)) {
+        this.relayAuthRetryAt = Date.now() + RELAY_UNAUTHORIZED_RETRY_MS;
+        console.warn(`[E2E SessionManager] Relay auth unavailable for pre-key fetch (${recipientId})`);
+        return null;
+      }
       console.error(`[E2E SessionManager] Failed to fetch pre-key bundle for ${recipientId}:`, error);
       return null;
     }
@@ -577,6 +595,15 @@ class SessionManager {
     if (!retryAt) return false;
     if (Date.now() >= retryAt) {
       this.missingPreKeyRetryAt.delete(recipientId);
+      return false;
+    }
+    return true;
+  }
+
+  private isRelayAuthRetryPending(): boolean {
+    if (!this.relayAuthRetryAt) return false;
+    if (Date.now() >= this.relayAuthRetryAt) {
+      this.relayAuthRetryAt = 0;
       return false;
     }
     return true;

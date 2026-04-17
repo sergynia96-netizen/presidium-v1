@@ -24,7 +24,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Too many token requests' }, { status: 429 });
     }
 
-    const secret = process.env.JWT_SECRET || process.env.NEXTAUTH_SECRET;
+    const secret =
+      process.env.RELAY_JWT_SECRET ||
+      process.env.JWT_SECRET ||
+      process.env.NEXTAUTH_SECRET;
     if (!secret) {
       return NextResponse.json({ error: 'JWT secret is not configured' }, { status: 500 });
     }
