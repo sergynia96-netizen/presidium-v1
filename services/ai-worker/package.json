@@ -1,13 +1,27 @@
 {
   "name": "@presidium/ai-worker",
   "version": "2.6.0",
-  "private": true,
-  "author": "Presidium Maintainer <maintainer@local.dev>",
+  "author": "Сергей Сергеевич Карнаух <sergey.karnaukh@presidium.app>",
   "license": "MIT",
+  "type": "module",
   "scripts": {
-    "build": "node -e \"console.log('ai-worker build stub')\"",
-    "dev": "node -e \"console.log('ai-worker dev stub')\"",
-    "lint": "node -e \"console.log('ai-worker lint stub')\"",
-    "typecheck": "node -e \"console.log('ai-worker typecheck stub')\""
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@presidium/shared-types": "workspace:*",
+    "@presidium/shared-crypto": "workspace:*",
+    "ioredis": "^5.6.0",
+    "bullmq": "^5.41.0",
+    "zod": "^3.24.0",
+    "onnxruntime-node": "^1.20.0",
+    "@xenova/transformers": "^2.17.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0"
   }
 }
