@@ -21,6 +21,10 @@ import feedRouter from './routes/feed.js';
 import mediaRouter from './routes/media.js';
 import storiesRouter from './routes/stories.js';
 import userRoutes from './routes/users.js';
+import marketplaceRouter from './routes/marketplace.js';
+import booksRouter from './routes/books.js';
+import subscriptionsRouter from './routes/subscriptions.js';
+import adminRouter from './routes/admin.js';
 import { getLocalConnectionCount, publishToLocalUser, wsHandler } from './ws/handler.js';
 
 const PORT = config.PORT;
@@ -54,6 +58,11 @@ httpApp.route('/feed', feedRouter);
 httpApp.route('/media', mediaRouter);
 httpApp.route('/contacts', contactsRouter);
 httpApp.route('/cron', cronRouter);
+
+httpApp.route('/marketplace', marketplaceRouter);
+httpApp.route('/books', booksRouter);
+httpApp.route('/subscriptions', subscriptionsRouter);
+httpApp.route('/admin', adminRouter);
 
 httpApp.notFound((c) => {
   return c.json(
@@ -294,3 +303,4 @@ process.on('SIGINT', () => {
 setInterval(() => {
   redis.set('ws:connection_count', String(getLocalConnectionCount())).catch(() => undefined);
 }, 10_000);
+
