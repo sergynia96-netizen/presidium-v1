@@ -1,0 +1,20 @@
+/* Shared UI base styles */
+:root {
+  --presidium-bg: #0f172a;
+  --presidium-surface: #111827;
+  --presidium-border: #1f2937;
+  --presidium-text: #f8fafc;
+  --presidium-muted: #94a3b8;
+  --presidium-primary: #4f46e5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}

@@ -7,6 +7,7 @@
  * - Added safer E2E recipient resolution for private chats only.
  * - Replaced header nested interactive structure (button-in-button risk) with accessible div role="button".
  * - Added guarded E2E session ensure calls to reduce retry/noise during relay auth failures.
+ * - Added per-chat E2E init-attempt lock to avoid infinite retry/render loops.
  */
 
 import { useEffect, useRef, useMemo, useCallback, useState, type CSSProperties } from 'react';
@@ -259,6 +260,7 @@ export function ChatView() {
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const activeChatIdRef = useRef<string | null>(activeChatId);
   const receiveMessageRef = useRef(receiveMessage);
+  const e2eSessionInitAttemptRef = useRef<string | null>(null);
   const tRef = useRef(t);
   const [showCallScreen, setShowCallScreen] = useState<'audio' | 'video' | null>(null);
   const [showWallpaperPicker, setShowWallpaperPicker] = useState(false);
@@ -291,6 +293,7 @@ export function ChatView() {
   const [pinnedIndex, setPinnedIndex] = useState(0);
   const [e2eInitialized, setE2eInitialized] = useState(false);
   const [e2eError, setE2eError] = useState<string | null>(null);
+  const [e2eSessionRetryNonce, setE2eSessionRetryNonce] = useState(0);
   const [showSafetyVerification, setShowSafetyVerification] = useState(false);
   const [e2eVerified, setE2eVerified] = useState(false);
   const [wasConnected, setWasConnected] = useState(false);
@@ -695,18 +698,35 @@ export function ChatView() {
   useEffect(() => {
     if (!activeChatId || !e2eInitialized || !e2eRecipientId) return;
 
+    const attemptKey = `${activeChatId}:${e2eRecipientId}`;
+    if (e2eSessionInitAttemptRef.current === attemptKey) {
+      return;
+    }
+    e2eSessionInitAttemptRef.current = attemptKey;
+
+    let cancelled = false;
+
     const ensureE2ESession = async () => {
-      const chatState = e2eChat.getChatState(e2eRecipientId);
-      if (!chatState.hasSession) {
-        const success = await e2eChat.ensureSession(activeChatId, e2eRecipientId);
-        if (!success) {
-          setE2eError(tRef.current('chat.e2eSessionFailed'));
+      try {
+        const chatState = e2eChat.getChatState(e2eRecipientId!);
+        if (!chatState.hasSession) {
+          const success = await e2eChat.ensureSession(activeChatId!, e2eRecipientId!);
+          if (!success && !cancelled) {
+            console.warn(
+              '[ChatView] E2E session initialization failed.',
+            );
+          }
         }
+      } catch (err) {
+        console.warn('[ChatView] E2E ensure session error:', err);
       }
     };
 
     void ensureE2ESession();
-  }, [activeChatId, e2eInitialized, e2eRecipientId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeChatId, e2eInitialized, e2eRecipientId, e2eSessionRetryNonce]);
 
   const persistMessageStatus = useCallback(
     async (messageId: string, status: 'sending' | 'sent' | 'delivered' | 'read', chatId?: string) => {
@@ -2486,17 +2506,10 @@ export function ChatView() {
           <ArrowLeft className="size-5" />
         </Button>
 
-        <div
-          role="button"
-          tabIndex={0}
-          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        <Button
+          variant="ghost"
           onClick={handleAvatarClick}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              handleAvatarClick();
-            }
-          }}
+          className="flex min-w-0 flex-1 items-center gap-3 text-left"
         >
           <Avatar className="size-10">
             <AvatarFallback
@@ -2562,7 +2575,7 @@ export function ChatView() {
               )}
             </div>
           </div>
-        </div>
+        </Button>
 
         <div className="flex shrink-0 items-center gap-1">
           <Button
@@ -2833,6 +2846,8 @@ export function ChatView() {
             <E2EErrorBanner
               onRetry={async () => {
                 setE2eError(null);
+                e2eSessionInitAttemptRef.current = null;
+                setE2eSessionRetryNonce((prev) => prev + 1);
                 try {
                   await reconnectE2E();
                 } catch {

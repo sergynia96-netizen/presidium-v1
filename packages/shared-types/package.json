@@ -1,0 +1,16 @@
+{
+  "name": "@presidium/shared-types",
+  "version": "2.6.0",
+  "author": "Presidium Maintainer <maintainer@local.dev>",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsc --watch"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

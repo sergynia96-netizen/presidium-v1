@@ -1,0 +1,36 @@
+{
+  "name": "@presidium/web",
+  "version": "2.6.0",
+  "private": true,
+  "author": "Presidium Maintainer <maintainer@local.dev>",
+  "license": "MIT",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "15.2.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@presidium/shared-types": "workspace:*",
+    "@presidium/shared-api": "workspace:*",
+    "@presidium/shared-ui": "workspace:*",
+    "@presidium/shared-crypto": "workspace:*",
+    "@tanstack/react-query": "^5.66.0",
+    "zustand": "^5.0.3",
+    "axios": "^1.7.9",
+    "zod": "^3.24.0",
+    "lucide-react": "^0.475.0",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/node": "^22.0.0"
+  }
+}

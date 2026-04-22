@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>Presidium</string>
+    <key>CFBundleIdentifier</key>
+    <string>app.presidium.messenger</string>
+    <key>CFBundleVersion</key>
+    <string>2.6.0</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>NSCameraUsageDescription</key>
+    <string>Presidium needs camera access to capture Stories and send media.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Presidium needs photo library access to share images and videos.</string>
+    <key>NSFaceIDUsageDescription</key>
+    <string>Presidium uses Face ID to protect your encrypted messages.</string>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>fetch</string>
+        <string>remote-notification</string>
+        <string>voip</string>
+    </array>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_presidium._tcp</string>
+    </array>
+</dict>
+</plist>

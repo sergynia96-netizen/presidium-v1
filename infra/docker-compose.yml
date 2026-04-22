@@ -1,0 +1,27 @@
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: presidium-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-presidium}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-presidium123}
+    volumes:
+      - minio_data:/data
+    networks:
+      - presidium-network
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  presidium-network:
+    driver: bridge
+
+volumes:
+  minio_data:

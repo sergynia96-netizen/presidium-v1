@@ -1,0 +1,5 @@
+syntax = "proto3";
+
+package presidium.relay;
+
+// Day 1 foundation placeholder.

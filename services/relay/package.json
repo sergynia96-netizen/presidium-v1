@@ -1,0 +1,43 @@
+{
+  "name": "@presidium/relay",
+  "version": "2.6.0",
+  "author": "[Ваше Полное Имя] <your-email@presidium.app>",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target bun",
+    "start": "bun dist/index.js",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.821.0",
+    "@aws-sdk/s3-request-presigner": "^3.821.0",
+    "@hono/zod-validator": "^0.4.3",
+    "@presidium/shared-api": "workspace:*",
+    "hono": "^4.7.0",
+    "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.51.0",
+    "bcryptjs": "^2.4.3",
+    "drizzle-orm": "^0.40.0",
+    "postgres": "^3.4.5",
+    "minio": "^8.0.6",
+    "ioredis": "^5.6.0",
+    "bullmq": "^5.41.0",
+    "jose": "^5.9.0",
+    "zod": "^3.24.0",
+    "@presidium/shared-types": "workspace:*",
+    "@presidium/shared-crypto": "workspace:*"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.30.0",
+    "@types/bun": "latest",
+    "@types/bcryptjs": "^2.4.6",
+    "typescript": "^5.7.0",
+    "vitest": "^2.0.0"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@presidium/ai-worker",
+  "version": "2.6.0",
+  "private": true,
+  "author": "Presidium Maintainer <maintainer@local.dev>",
+  "license": "MIT",
+  "scripts": {
+    "build": "node -e \"console.log('ai-worker build stub')\"",
+    "dev": "node -e \"console.log('ai-worker dev stub')\"",
+    "lint": "node -e \"console.log('ai-worker lint stub')\"",
+    "typecheck": "node -e \"console.log('ai-worker typecheck stub')\""
+  }
+}

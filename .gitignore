@@ -1,109 +1,63 @@
 # Dependencies
 node_modules/
-.pnp
-.pnp.js
-.yarn/install-state.gz
+.pnpm-store/
 
-# Testing
-coverage/
-.nyc_output/
-
-# Next.js
+# Build outputs
+dist/
 .next/
 out/
-build/
-dist/
+src-tauri/target/
 
-# Production
-/standalone/
-
-# Environment variables (CRITICAL: Never commit these)
+# Environment
 .env
 .env.local
-.env.development.local
-.env.test.local
-.env.production.local
-*.env
+.env.*.local
 
-# Logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-*.log
+# IDE
+.vscode/*
+!.vscode/settings.json
+.idea/
 
 # OS
 .DS_Store
 Thumbs.db
-Desktop.ini
-*.swp
-*.swo
-*~
 
-# IDE
-.vscode/*
-!.vscode/extensions.json
-.idea/
-*.sublime-workspace
-*.sublime-project
+# Logs
+*.log
+logs/
 
-# Prisma
-prisma/*.db
-prisma/*.db-journal
-prisma/migrations/*.db
+# Database
+*.db
+*.db-journal
+postgres_data/
+valkey_data/
+minio_data/
 
-# Uploads (keep directory structure)
-/upload/
-!/upload/
-!/upload/.gitkeep
-/download/
-!/download/
-!/download/.gitkeep
+# Test
+coverage/
+playwright-report/
 
-# Cache
-.cache/
-.tmp/
-.temp/
+# Turborepo / local npm cache
+.turbo/
+.npm-cache/
 
-# Vercel
-.vercel
-
-# TypeScript
-*.tsbuildinfo
-next-env.d.ts
-
-# Debug
-test
-prompt
-server.log
-dev.log
-
-# Claude
-.claude
-.z-ai-config
-.zscripts/
-
-# Local relay service secrets/artifacts
-mini-services/relay-backend/.env
-mini-services/relay-backend/.env.*
-!mini-services/relay-backend/.env.example
-mini-services/relay-backend/*.log
-
-# Skills
-skills/
-
-# Local AI assistant/editor metadata
-.qwen/
-agent-ctx/
-
-# Local runtime/tooling bundles (do not publish binaries)
+# Local tools
 tools/
 
-# Local databases
-db/*.db
-db/*.sqlite
-db/*.sqlite3
+# AI tool configs
+.qwen/
 
-# Bundle analysis
-stats.json
+.zscripts/
+
+agent-ctx/
+
+tmp/
+
+download/
+
+upload/
+
+*.tmp-dev.log
+*.tmp-start.log
+
+examples/

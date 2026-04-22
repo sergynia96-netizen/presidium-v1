@@ -79,18 +79,6 @@ export function EncryptionStatusBadge({
   return (
     <span
       onClick={onClick}
-      role={interactive ? 'button' : undefined}
-      tabIndex={interactive ? 0 : undefined}
-      onKeyDown={
-        interactive
-          ? (event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                onClick();
-              }
-            }
-          : undefined
-      }
       className={`
         inline-flex items-center gap-1.5 px-2 py-1 rounded-full
         text-xs font-medium transition-all duration-200

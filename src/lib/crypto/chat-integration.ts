@@ -112,8 +112,10 @@ class E2EChatIntegration {
 
         this.initialized = true;
       } catch (error) {
-        console.error('[E2EChatIntegration] Initialization failed:', error);
-        throw error;
+        console.warn('[E2EChatIntegration] Initialization failed:', error);
+        this.initialized = false;
+        this.initializePromise = null;
+        return;
       }
     })();
 
