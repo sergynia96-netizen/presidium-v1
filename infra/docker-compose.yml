@@ -1,27 +1,134 @@
+/**
+ * @author Сергей Сергеевич Карнаух
+ * @copyright (C) 2026 Сергей Сергеевич Карнаух. All Rights Reserved.
+ */
+
+version: "3.9"
+
 services:
-  minio:
-    image: minio/minio:latest
-    container_name: presidium-minio
-    command: server /data --console-address ":9001"
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+  postgres:
+    image: postgres:16-alpine
+    container_name: presidium-postgres
+    restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-presidium}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-presidium123}
+      POSTGRES_DB: ${POSTGRES_DB:-presidium}
+      POSTGRES_USER: ${POSTGRES_USER:-presidium}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - minio_data:/data
-    networks:
-      - presidium-network
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-presidium}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - presidium-network
+
+  valkey:
+    image: valkey/valkey:8
+    container_name: presidium-valkey
+    restart: unless-stopped
+    command: valkey-server --requirepass ${VALKEY_PASSWORD:?VALKEY_PASSWORD is required}
+    ports:
+      - "${VALKEY_PORT:-6379}:6379"
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-a", "${VALKEY_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - presidium-network
+
+  minio:
+    image: minio/minio:latest
+    container_name: presidium-minio
+    restart: unless-stopped
+    command: server /data --console-address ":${MINIO_CONSOLE_PORT:-9001}"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    networks:
+      - presidium-network
+
+  coturn:
+    image: coturn/coturn:latest
+    container_name: presidium-coturn
+    restart: unless-stopped
+    volumes:
+      - ./coturn.conf:/etc/coturn/turnserver.conf:ro
+    network_mode: host
+    environment:
+      COTURN_USER: ${COTURN_USER:-presidium}
+      COTURN_PASSWORD: ${COTURN_PASSWORD:?COTURN_PASSWORD is required}
+      COTURN_REALM: ${COTURN_REALM:-presidium.turn}
+      COTURN_EXTERNAL_IP: ${COTURN_EXTERNAL_IP:?COTURN_EXTERNAL_IP is required}
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: presidium-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      - presidium-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: presidium-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD is required}
+    ports:
+      - "${GRAFANA_PORT:-3002}:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - presidium-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: presidium-nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - nginx-logs:/var/log/nginx
+    depends_on:
+      - postgres
+      - valkey
+    networks:
+      - presidium-network
+
+volumes:
+  postgres-data:
+  valkey-data:
+  minio-data:
+  prometheus-data:
+  grafana-data:
+  nginx-logs:
 
 networks:
   presidium-network:
     driver: bridge
-
-volumes:
-  minio_data:
