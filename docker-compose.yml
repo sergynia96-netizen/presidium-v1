@@ -57,21 +57,23 @@ services:
       start_period: 40s
 
   # ─── Relay Backend ────────────────────────
+  # Production relay uses services/relay. mini-services/relay-backend is legacy and kept for migration history.
   relay:
     build:
-      context: ./mini-services/relay-backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/relay/Dockerfile
     container_name: presidium-relay
     restart: unless-stopped
     ports:
       - "3001:3001"
     environment:
       - NODE_ENV=production
+      - PORT=3001
       - DATABASE_URL=postgresql://presidium:${DB_PASSWORD:?Set DB_PASSWORD in .env.local}@db:5432/relay?schema=public
       - REDIS_URL=redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.local}@redis:6379
       - JWT_SECRET=${JWT_SECRET:?Set JWT_SECRET in .env.local}
       - CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
-      - PORT=3001
+      - MODERATION_ENABLED=${MODERATION_ENABLED:-true}
     depends_on:
       db:
         condition: service_healthy
