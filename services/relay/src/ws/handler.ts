@@ -16,7 +16,7 @@ import { endUserCalls } from '../handlers/call.js';
 import { routeMessage } from './router.js';
 
 interface UpgradeData {
-  token: string;
+  token?: string;
   deviceId?: string;
 }
 
@@ -71,23 +71,72 @@ export function getLocalConnectionCount(): number {
   return total;
 }
 
+async function authenticateSocket(
+  ws: ExtendedWebSocket,
+  token: string,
+  redis: Redis
+): Promise<void> {
+  const payload = await verifyToken(token);
+
+  ws.userId = payload.sub;
+  ws.deviceId = ws.deviceId || payload.deviceId || 'unknown';
+  ws.isAuthenticated = true;
+  ws.lastPingAt = Date.now();
+
+  addLocalSocket(payload.sub, ws);
+
+  await redis.sadd(`user:sockets:${payload.sub}`, ws.deviceId);
+
+  await redis.hset(`presence:${payload.sub}`, {
+    status: 'online',
+    lastSeen: Date.now(),
+    deviceId: ws.deviceId,
+  });
+
+  const offlineKey = `offline:${payload.sub}`;
+  const queuedMessages = await redis.lrange(offlineKey, 0, -1);
+
+  if (queuedMessages.length > 0) {
+    for (const message of queuedMessages) {
+      ws.send(message, false);
+    }
+    await redis.del(offlineKey);
+  }
+
+  const authPayload = {
+    userId: payload.sub,
+    deviceId: ws.deviceId,
+    tier: payload.tier || 'free',
+    serverTime: Date.now(),
+  };
+
+  ws.send(
+    JSON.stringify({
+      type: 'auth.success',
+      payload: authPayload,
+      timestamp: Date.now(),
+    }),
+    false
+  );
+
+  // Backward-compatible signal for the existing web RelayE2EClient.
+  ws.send(
+    JSON.stringify({
+      type: 'connected',
+      payload: authPayload,
+      timestamp: Date.now(),
+    }),
+    false
+  );
+
+  await broadcastPresence(payload.sub, 'online', redis);
+}
+
 export const wsHandler = {
   async upgrade(res: any, req: any, context: any): Promise<void> {
     const query = req.getQuery();
     const fullUrl = query ? `${req.getUrl()}?${query}` : req.getUrl();
     const { token, deviceId } = extractTokenFromUrl(fullUrl);
-
-    if (!token) {
-      res.writeStatus('401 Unauthorized');
-      res.writeHeader('Content-Type', 'application/json');
-      res.end(
-        JSON.stringify({
-          error: 'Unauthorized',
-          message: 'JWT token required in query param: ?token=JWT',
-        })
-      );
-      return;
-    }
 
     let aborted = false;
     res.onAborted(() => {
@@ -95,7 +144,13 @@ export const wsHandler = {
     });
 
     try {
-      await verifyToken(token);
+      // Query-token authentication is still supported for production clients.
+      // Missing token is allowed so browser clients can authenticate immediately
+      // after connect with `{ type: 'auth', payload: { token } }`.
+      if (token) {
+        await verifyToken(token);
+      }
+
       if (aborted) {
         return;
       }
@@ -126,48 +181,24 @@ export const wsHandler = {
   async open(ws: ExtendedWebSocket, redis: Redis): Promise<void> {
     try {
       const data = ws.getUserData() as UpgradeData;
-      const payload = await verifyToken(data.token);
-
-      ws.userId = payload.sub;
-      ws.deviceId = data.deviceId || payload.deviceId || 'unknown';
-      ws.isAuthenticated = true;
+      ws.deviceId = data.deviceId || 'unknown';
       ws.lastPingAt = Date.now();
 
-      addLocalSocket(payload.sub, ws);
-
-      await redis.sadd(`user:sockets:${payload.sub}`, ws.deviceId);
-
-      await redis.hset(`presence:${payload.sub}`, {
-        status: 'online',
-        lastSeen: Date.now(),
-        deviceId: ws.deviceId,
-      });
-
-      const offlineKey = `offline:${payload.sub}`;
-      const queuedMessages = await redis.lrange(offlineKey, 0, -1);
-
-      if (queuedMessages.length > 0) {
-        for (const message of queuedMessages) {
-          ws.send(message, false);
-        }
-        await redis.del(offlineKey);
+      if (data.token) {
+        await authenticateSocket(ws, data.token, redis);
+        return;
       }
 
       ws.send(
         JSON.stringify({
-          type: 'auth.success',
+          type: 'auth.required',
           payload: {
-            userId: payload.sub,
-            deviceId: ws.deviceId,
-            tier: payload.tier || 'free',
-            serverTime: Date.now(),
+            message: 'Send auth payload to complete WebSocket authentication',
           },
           timestamp: Date.now(),
         }),
         false
       );
-
-      await broadcastPresence(payload.sub, 'online', redis);
     } catch (err) {
       console.error('[WS] Auth failed in open handler:', err);
 
@@ -193,18 +224,6 @@ export const wsHandler = {
     isBinary: boolean,
     redis: Redis
   ): Promise<void> {
-    if (!ws.isAuthenticated || !ws.userId) {
-      ws.send(
-        JSON.stringify({
-          type: 'error',
-          payload: { error: 'Not authenticated' },
-          timestamp: Date.now(),
-        }),
-        false
-      );
-      return;
-    }
-
     try {
       if (isBinary) {
         return;
@@ -218,6 +237,39 @@ export const wsHandler = {
           JSON.stringify({
             type: 'error',
             payload: { error: 'Invalid message format: missing type or payload' },
+            timestamp: Date.now(),
+          }),
+          false
+        );
+        return;
+      }
+
+      if (!ws.isAuthenticated || !ws.userId) {
+        if (envelope.type === 'auth' && typeof envelope.payload.token === 'string') {
+          try {
+            await authenticateSocket(ws, envelope.payload.token, redis);
+          } catch (err) {
+            console.error('[WS] Post-connect auth failed:', err);
+            ws.send(
+              JSON.stringify({
+                type: 'auth.error',
+                payload: {
+                  error: 'Authentication failed',
+                  message: err instanceof Error ? err.message : 'Unknown error',
+                },
+                timestamp: Date.now(),
+              }),
+              false
+            );
+            ws.close();
+          }
+          return;
+        }
+
+        ws.send(
+          JSON.stringify({
+            type: 'error',
+            payload: { error: 'Not authenticated', code: 'auth_required' },
             timestamp: Date.now(),
           }),
           false
