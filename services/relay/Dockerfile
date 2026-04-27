@@ -41,11 +41,16 @@ RUN pnpm install --frozen-lockfile --filter @presidium/relay...
 
 FROM deps AS builder
 
+COPY packages ./packages
 COPY services/relay/src ./services/relay/src
 COPY services/relay/drizzle.config.ts ./services/relay/drizzle.config.ts
 COPY services/relay/tsconfig.json ./services/relay/tsconfig.json
-COPY packages ./packages
 
+# Build workspace dependencies first. Their package.json files point to dist/*,
+# so relay typecheck/build must not rely on unbuilt source-only packages.
+RUN pnpm --filter @presidium/shared-types build
+RUN pnpm --filter @presidium/shared-api build
+RUN pnpm --filter @presidium/shared-crypto build
 RUN pnpm --filter @presidium/relay typecheck
 RUN pnpm --filter @presidium/relay build
 
@@ -60,7 +65,7 @@ RUN addgroup --system --gid 1001 presidium \
 
 COPY --from=deps --chown=relay:presidium /app/node_modules ./node_modules
 COPY --from=deps --chown=relay:presidium /app/services/relay/node_modules ./services/relay/node_modules
-COPY --from=deps --chown=relay:presidium /app/packages ./packages
+COPY --from=builder --chown=relay:presidium /app/packages ./packages
 COPY --from=builder --chown=relay:presidium /app/services/relay/dist ./services/relay/dist
 COPY --from=builder --chown=relay:presidium /app/services/relay/package.json ./services/relay/package.json
 COPY --from=builder --chown=relay:presidium /app/services/relay/drizzle.config.ts ./services/relay/drizzle.config.ts
