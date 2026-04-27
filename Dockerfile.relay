@@ -1,29 +1,33 @@
-FROM oven/bun:latest AS builder
+FROM oven/bun:1 AS base
 WORKDIR /app
 
-# Copy dependency files
-COPY mini-services/relay-backend/package.json mini-services/relay-backend/bun.lock* ./
-RUN bun install --frozen-lockfile || bun install
+# Prepare pnpm for workspace dependency install
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
-# Copy source code and Prisma schema
-COPY mini-services/relay-backend/prisma ./prisma
-COPY mini-services/relay-backend/src ./src
+# Copy workspace manifests first for better layer caching
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY services/relay/package.json ./services/relay/package.json
+COPY packages/shared-api/package.json ./packages/shared-api/package.json
+COPY packages/shared-types/package.json ./packages/shared-types/package.json
+COPY packages/shared-crypto/package.json ./packages/shared-crypto/package.json
 
-# Generate prisma client
-RUN bunx prisma generate
+# Install all workspace dependencies required by relay
+RUN pnpm install --frozen-lockfile
 
-FROM oven/bun:latest AS runner
+# Copy source code
+COPY services ./services
+COPY packages ./packages
+
+# Build relay bundle
+RUN pnpm --filter @presidium/relay build
+
+FROM oven/bun:1 AS runner
 WORKDIR /app
+ENV NODE_ENV=production
 
-# Copy production dependencies and generated client
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/src ./src
+# Runtime artifacts
+COPY --from=base /app/node_modules ./node_modules
+COPY --from=base /app/services/relay/dist ./services/relay/dist
 
-# Create SQLite data directory explicitly
-RUN mkdir -p /app/data
-ENV DATABASE_URL=file:/app/data/relay.db
-
-# Before starting, push prisma schema to make sure the db is created and schema is up to date
 EXPOSE 3001
-CMD ["sh", "-c", "bunx prisma db push && bun src/index.ts"]
+CMD ["bun", "services/relay/dist/index.js"]
