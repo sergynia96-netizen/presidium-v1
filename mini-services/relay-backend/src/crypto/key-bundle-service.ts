@@ -1,7 +1,16 @@
 // ─── Pre-Key Bundle Management ─────────────────────
 // Signal Protocol X3DH pre-key storage and retrieval
 
+/*
+ * CHANGELOG (Codex)
+ * 2026-04-17:
+ * - Replaced pre-key upload path with full replace transaction:
+ *   `deleteMany(accountId) + createMany(keysToInsert)`.
+ * - Added strict guard for missing `accountId` in upload payload assembly.
+ */
+
 import { prisma } from '../prisma';
+import { ensureAccountExists } from '../auth/auth-service';
 
 export interface KeyBundle {
   identityKey: string;
@@ -20,45 +29,45 @@ export async function uploadPreKeys(
   oneTimePreKeys: string[],
   signature?: string,
 ) {
-  // Delete all existing one-time keys and replace with new batch
-  await prisma.preKeyBundle.deleteMany({
-    where: { accountId, preKeyId: { gt: 0 } },
-  });
-
-  // Upsert signed pre-key (preKeyId = 0)
-  // Note: signature field requires Prisma client regeneration after schema update
-  await prisma.preKeyBundle.upsert({
-    where: {
-      accountId_preKeyId: { accountId, preKeyId: 0 },
+  const keysToInsert = [
+    {
+      accountId,
+      preKeyId: 0,
+      publicKey: signedPreKey,
+      signature,
+      isUsed: false,
     },
-    update: { publicKey: signedPreKey, isUsed: false },
-    create: { accountId, preKeyId: 0, publicKey: signedPreKey },
-  });
+    ...oneTimePreKeys.map((key, i) => ({
+      accountId,
+      preKeyId: i + 1,
+      publicKey: key,
+      isUsed: false,
+    })),
+  ];
 
-  // Insert new one-time pre-keys
-  if (oneTimePreKeys.length > 0) {
-    // Find the max existing preKeyId to avoid collisions
-    const maxKey = await prisma.preKeyBundle.findFirst({
-      where: { accountId },
-      orderBy: { preKeyId: 'desc' },
-      select: { preKeyId: true },
-    });
-    const startId = (maxKey?.preKeyId ?? 0) + 1;
+  const uploadAccountId = keysToInsert[0]?.accountId;
 
-    await prisma.preKeyBundle.createMany({
-      data: oneTimePreKeys.map((key, i) => ({
-        accountId,
-        preKeyId: startId + i,
-        publicKey: key,
-      })),
-    });
+  if (!uploadAccountId) {
+    throw new Error('Cannot upload keys: accountId is missing');
   }
+
+  await prisma.$transaction([
+    prisma.preKeyBundle.deleteMany({
+      where: { accountId: uploadAccountId },
+    }),
+    prisma.preKeyBundle.createMany({
+      data: keysToInsert,
+    }),
+  ]);
 
   return { success: true, count: oneTimePreKeys.length };
 }
 
 // Get pre-key bundle for initiating session with a user
 export async function getPreKeyBundle(targetAccountId: string): Promise<KeyBundle | { error: string }> {
+  // Auto-provision account if not exists (handles User ID from main app)
+  await ensureAccountExists(targetAccountId);
+
   const account = await prisma.account.findUnique({
     where: { id: targetAccountId },
     select: { id: true, publicKey: true },

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --hot src/index.ts",
+    "dev": "bun --env-file=../../.env --hot src/index.ts",
     "start": "bun src/index.ts",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
