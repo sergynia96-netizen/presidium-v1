@@ -71,8 +71,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Install active workspace dependencies
+        run: >-
+          pnpm install --frozen-lockfile
+          --filter @presidium/web...
+          --filter @presidium/relay...
+          --filter @presidium/shared-ui...
+          --filter @presidium/shared-crypto...
 
       - name: Build shared workspace packages
         run: |
