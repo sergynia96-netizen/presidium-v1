@@ -11,7 +11,10 @@
  */
 
 /*
- * CHANGELOG (Codex)
+ * CHANGELOG
+ * 2026-04-28:
+ * - Pass chatId into RelayE2EClient so encrypted envelopes are sent as production `chat.message` payloads.
+ *
  * 2026-04-17:
  * - Added init deduplication via initializePromise to avoid parallel init races.
  * - Marked pre-key upload unauthorized state to avoid repeated failing uploads.
@@ -211,7 +214,7 @@ class E2EChatIntegration {
    * Send an encrypted message.
    */
   async sendEncryptedMessage(
-    _chatId: string,
+    chatId: string,
     senderId: string,
     recipientId: string,
     plaintext: string,
@@ -229,8 +232,8 @@ class E2EChatIntegration {
         plaintext,
       );
 
-      // Send via relay
-      await relayClient.sendEncryptedMessage(envelope);
+      // Send via production relay chat protocol.
+      await relayClient.sendEncryptedMessage(chatId, envelope);
 
       // Record success
       await sessionManager.recordSuccess(recipientId);
@@ -239,7 +242,7 @@ class E2EChatIntegration {
       const timestamp = Date.now();
       const storedMessage: StoredMessage = {
         id: envelope.messageId,
-        chatId: _chatId,
+        chatId,
         senderId,
         recipientId,
         encrypted: JSON.stringify(envelope),
