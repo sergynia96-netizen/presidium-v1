@@ -28,6 +28,11 @@ export interface ExtendedWebSocket extends WebSocket<UpgradeData> {
 }
 
 const localSockets = new Map<string, Set<ExtendedWebSocket>>();
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(value: string): boolean {
+  return UUID_REGEX.test(value);
+}
 
 function addLocalSocket(userId: string, ws: ExtendedWebSocket) {
   if (!localSockets.has(userId)) {
@@ -335,6 +340,13 @@ async function broadcastPresence(
   status: 'online' | 'offline' | 'recently',
   redis: Redis
 ): Promise<void> {
+  if (!isUuid(userId)) {
+    // Legacy root web users are identified by cuid(). Their presence is already
+    // tracked in Redis by authenticateSocket/close; Postgres contacts use UUID
+    // foreign keys and must not be queried with cuid() values.
+    return;
+  }
+
   try {
     const userContacts = await db.query.contacts.findMany({
       where: eq(contacts.userId, userId),
