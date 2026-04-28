@@ -40,7 +40,7 @@ Docker Compose config
 Target commands:
 
 ```text
-pnpm install --frozen-lockfile
+pnpm install --no-frozen-lockfile --filter active web/relay workspace
 @presidium/shared-types build
 @presidium/shared-api build
 @presidium/shared-crypto build
@@ -52,11 +52,39 @@ pnpm install --frozen-lockfile
 docker compose config
 ```
 
-Desktop and mobile packages are intentionally outside the first CI gate until their platform-specific dependency chains are stabilized.
+Desktop, mobile, and AI worker packages are intentionally outside the first CI gate until their platform-specific dependency chains are stabilized.
 
 ---
 
-## 3. Why shared packages build first
+## 3. Temporary lockfile mode
+
+The active-stack workflow currently uses:
+
+```bash
+pnpm install --no-frozen-lockfile
+```
+
+This is a temporary CI mode.
+
+Reason: `services/ai-worker/package.json` contains dependency specifiers that are not yet reflected in `pnpm-lock.yaml`. Even filtered installs still make pnpm validate workspace importer consistency.
+
+Final fix:
+
+```bash
+pnpm install --lockfile-only
+```
+
+Then commit the updated `pnpm-lock.yaml` and restore CI install to:
+
+```bash
+pnpm install --frozen-lockfile
+```
+
+This must be done from a real local development environment or controlled CI job that can resolve the full dependency graph, including `onnxruntime-node` and `@xenova/transformers`.
+
+---
+
+## 4. Why shared packages build first
 
 The relay and web app depend on workspace packages:
 
@@ -71,7 +99,7 @@ Several workspace packages expose `dist/*` files through package metadata. Build
 
 ---
 
-## 4. CI environment placeholders
+## 5. CI environment placeholders
 
 The workflow uses non-production placeholder values only for build/config validation. These values are not production secrets and must not be reused outside CI.
 
@@ -79,7 +107,7 @@ The real production deployment must provide separate rotated values through the 
 
 ---
 
-## 5. Checks intentionally not included yet
+## 6. Checks intentionally not included yet
 
 The current CI intentionally does not run:
 
@@ -91,13 +119,14 @@ real Redis offline queue integration test
 real Postgres migrations against a live DB
 desktop Tauri build
 mobile Capacitor build
+ai-worker build
 ```
 
 Reason: the project is still in a transition phase between legacy root Prisma/SQLite web data and canonical relay/Postgres data. The first CI gate should be fast, deterministic, and cheap.
 
 ---
 
-## 6. Next CI phases
+## 7. Next CI phases
 
 ### Phase 1 — active stack baseline
 
@@ -105,7 +134,17 @@ Reason: the project is still in a transition phase between legacy root Prisma/SQ
 install → shared builds → relay typecheck/build → web typecheck/build → compose config
 ```
 
-### Phase 2 — relay container build
+### Phase 2 — lockfile restoration
+
+Run locally or in a controlled environment:
+
+```bash
+pnpm install --lockfile-only
+```
+
+Commit `pnpm-lock.yaml` and restore frozen install mode in CI.
+
+### Phase 3 — relay container build
 
 Add:
 
@@ -115,7 +154,7 @@ docker compose build relay
 
 after the relay Dockerfile is validated locally.
 
-### Phase 3 — service integration
+### Phase 4 — service integration
 
 Add service containers:
 
@@ -136,7 +175,7 @@ WebSocket auth
 chat.message → chat.ack
 ```
 
-### Phase 4 — browser E2E smoke
+### Phase 5 — browser E2E smoke
 
 Add Playwright or equivalent browser automation for:
 
@@ -151,20 +190,21 @@ offline queue drain
 
 This phase should only start after the canonical data migration plan is underway.
 
-### Phase 5 — platform workflows
+### Phase 6 — platform workflows
 
 Add separate workflows for:
 
 ```text
 desktop Tauri build
 mobile Capacitor build
+ai-worker build
 ```
 
 These should not block the web/relay MVP gate until platform apps are actively maintained.
 
 ---
 
-## 7. Rule
+## 8. Rule
 
 A green active-stack CI run means:
 
