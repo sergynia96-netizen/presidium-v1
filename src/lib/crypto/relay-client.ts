@@ -9,6 +9,7 @@
  * CHANGELOG
  * 2026-04-28:
  * - Added outgoing adapter: EncryptedEnvelope -> production `chat.message`.
+ * - Added recipientId to outgoing payload for relay transport fallback while web chats still use Prisma/cuid IDs.
  * - Added `chat.ack` support so backend acknowledgements resolve pending sends.
  * - Added `chat.typing` and `chat.read` support for production relay events.
  * - Kept the E2E envelope opaque: relay receives JSON inside `encryptedPayload`.
@@ -53,6 +54,7 @@ export interface RelayChatAckMessage {
     offlineCount?: number;
     totalMembers?: number;
     processingTimeMs?: number;
+    mode?: string;
   };
   timestamp?: number;
 }
@@ -63,6 +65,7 @@ export interface RelayChatMessage {
     id: string;
     chatId: string;
     senderId: string;
+    recipientId?: string;
     encryptedPayload: string;
     nonce: string;
     type?: string;
@@ -587,6 +590,7 @@ class RelayE2EClient {
         type: 'chat.message',
         payload: {
           chatId,
+          recipientId: envelope.recipientId,
           encryptedPayload: JSON.stringify(envelope),
           nonce: envelope.iv,
           type: 'text',
