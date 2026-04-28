@@ -14,6 +14,7 @@ const SECRET = new TextEncoder().encode(config.JWT_SECRET);
 export interface TokenPayload extends JWTPayload {
   sub: string;
   email: string;
+  legacyWebUserId?: string;
   deviceId?: string;
   tier?: 'free' | 'local_ai' | 'cloud_ai';
 }

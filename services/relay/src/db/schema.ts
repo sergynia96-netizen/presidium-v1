@@ -35,6 +35,7 @@ export const users = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     name: varchar('name', { length: 255 }).notNull(),
     email: varchar('email', { length: 255 }).notNull().unique(),
+    legacyWebUserId: text('legacy_web_user_id'),
     passwordHash: text('password_hash'),
     avatar: text('avatar'),
     publicKey: text('public_key').notNull(),
@@ -51,6 +52,9 @@ export const users = pgTable(
   },
   (table) => [
     uniqueIndex('users_email_idx').on(table.email),
+    uniqueIndex('users_legacy_web_user_id_idx')
+      .on(table.legacyWebUserId)
+      .where(sql`${table.legacyWebUserId} IS NOT NULL`),
     index('users_status_idx').on(table.status),
     index('users_presence_idx').on(table.presenceStatus),
     index('users_created_idx').on(table.createdAt),

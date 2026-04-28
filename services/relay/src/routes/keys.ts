@@ -76,6 +76,25 @@ function bundleKey(userId: string): string {
   return `prekeys:bundle:${userId}`;
 }
 
+function bundleAliasKey(userId: string): string {
+  return `prekeys:alias:${userId}`;
+}
+
+async function resolveBundleKey(userId: string): Promise<string> {
+  const directKey = bundleKey(userId);
+  const directBundle = await redis.get(directKey);
+  if (directBundle) {
+    return directKey;
+  }
+
+  const canonicalUserId = await redis.get(bundleAliasKey(userId));
+  if (!canonicalUserId) {
+    return directKey;
+  }
+
+  return bundleKey(canonicalUserId);
+}
+
 function normalizeBundle(userId: string, input: z.infer<typeof preKeyUploadSchema>): StoredPreKeyBundle {
   const signedPreKey =
     typeof input.signedPreKey === 'string'
@@ -144,6 +163,17 @@ app.post('/upload', apiRateLimit, async (c) => {
 
   const bundle = normalizeBundle(tokenPayload.sub, parsed.data);
   await redis.set(bundleKey(tokenPayload.sub), JSON.stringify(bundle), 'EX', PREKEY_BUNDLE_TTL_SECONDS);
+  const legacyWebUserId = typeof tokenPayload.legacyWebUserId === 'string'
+    ? tokenPayload.legacyWebUserId.trim()
+    : '';
+  if (legacyWebUserId && legacyWebUserId !== tokenPayload.sub) {
+    await redis.set(
+      bundleAliasKey(legacyWebUserId),
+      tokenPayload.sub,
+      'EX',
+      PREKEY_BUNDLE_TTL_SECONDS
+    );
+  }
 
   return c.json({
     success: true,
@@ -158,7 +188,7 @@ app.post('/upload', apiRateLimit, async (c) => {
 
 app.get('/:userId', apiRateLimit, async (c) => {
   const userId = c.req.param('userId');
-  const rawBundle = await redis.get(bundleKey(userId));
+  const rawBundle = await redis.get(await resolveBundleKey(userId));
 
   if (!rawBundle) {
     return c.json(
