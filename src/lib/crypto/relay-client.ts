@@ -10,6 +10,7 @@
  * 2026-04-28:
  * - Added outgoing adapter: EncryptedEnvelope -> production `chat.message`.
  * - Added `chat.ack` support so backend acknowledgements resolve pending sends.
+ * - Added `chat.typing` and `chat.read` support for production relay events.
  * - Kept the E2E envelope opaque: relay receives JSON inside `encryptedPayload`.
  *
  * 2026-04-17:
@@ -79,6 +80,35 @@ export interface RelayTypingMessage {
   isTyping: boolean;
 }
 
+export interface RelayChatTypingMessage {
+  type: 'chat.typing';
+  payload: {
+    chatId: string;
+    userId: string;
+    isTyping: boolean;
+  };
+  timestamp?: number;
+}
+
+export interface RelayReadMessage {
+  type: 'read';
+  messageId: string;
+  chatId: string;
+  readBy: string;
+  readAt: number;
+}
+
+export interface RelayChatReadMessage {
+  type: 'chat.read';
+  payload: {
+    messageId: string;
+    chatId: string;
+    readBy: string;
+    readAt: number;
+  };
+  timestamp?: number;
+}
+
 export interface RelayPresenceMessage {
   type: 'presence';
   userId: string;
@@ -92,6 +122,9 @@ export type RelayIncomingMessage =
   | RelayAckMessage
   | RelayChatAckMessage
   | RelayTypingMessage
+  | RelayChatTypingMessage
+  | RelayReadMessage
+  | RelayChatReadMessage
   | RelayPresenceMessage
   | { type: 'pong' }
   | { type: 'connected' }
@@ -104,6 +137,7 @@ export type RelayEvent =
   | { type: 'message'; data: RelayMessageEnvelope }
   | { type: 'ack'; data: RelayAckMessage }
   | { type: 'typing'; data: RelayTypingMessage }
+  | { type: 'read'; data: RelayReadMessage }
   | { type: 'presence'; data: RelayPresenceMessage }
   | { type: 'connected' }
   | { type: 'disconnected'; reason: string }
@@ -138,6 +172,25 @@ function parseRelayChatMessage(message: RelayChatMessage): RelayMessageEnvelope 
   } catch {
     return null;
   }
+}
+
+function normalizeTypingMessage(message: RelayChatTypingMessage): RelayTypingMessage {
+  return {
+    type: 'typing',
+    chatId: message.payload.chatId,
+    userId: message.payload.userId,
+    isTyping: message.payload.isTyping,
+  };
+}
+
+function normalizeReadMessage(message: RelayChatReadMessage): RelayReadMessage {
+  return {
+    type: 'read',
+    messageId: message.payload.messageId,
+    chatId: message.payload.chatId,
+    readBy: message.payload.readBy,
+    readAt: message.payload.readAt,
+  };
 }
 
 class RelayE2EClient {
@@ -429,6 +482,18 @@ class RelayE2EClient {
           this.emit({ type: 'typing', data: parsed as RelayTypingMessage });
           break;
 
+        case 'chat.typing':
+          this.emit({ type: 'typing', data: normalizeTypingMessage(parsed as RelayChatTypingMessage) });
+          break;
+
+        case 'read':
+          this.emit({ type: 'read', data: parsed as RelayReadMessage });
+          break;
+
+        case 'chat.read':
+          this.emit({ type: 'read', data: normalizeReadMessage(parsed as RelayChatReadMessage) });
+          break;
+
         case 'presence':
           this.emit({ type: 'presence', data: parsed as RelayPresenceMessage });
           break;
@@ -542,8 +607,11 @@ class RelayE2EClient {
     if (!this.isConnected) return;
 
     this.wsManager?.send({
-      type: isTyping ? 'typing.start' : 'typing.stop',
-      chatId,
+      type: 'chat.typing',
+      payload: {
+        chatId,
+        isTyping,
+      },
     });
   }
 
@@ -551,9 +619,11 @@ class RelayE2EClient {
     if (!this.isConnected) return;
 
     this.wsManager?.send({
-      type: 'message_read',
-      messageId,
-      chatId,
+      type: 'chat.read',
+      payload: {
+        messageId,
+        chatId,
+      },
     });
   }
 
