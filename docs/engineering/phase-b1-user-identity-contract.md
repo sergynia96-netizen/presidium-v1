@@ -315,6 +315,24 @@ Pragmatic transition option:
 Option B is acceptable temporarily if documented and isolated in one helper.
 ```
 
+### 7.5 `public_key` placeholder note (transition-only)
+
+Current relay users schema keeps `users.public_key` as `NOT NULL`.
+
+Phase B1 identity bridge does **not** migrate or generate private E2EE key material.
+If a bridge create path must satisfy `NOT NULL`, it may use a clearly marked temporary
+placeholder value (for example `pending:<legacyWebUserId>`) until the normal pre-key
+upload flow stores the real public key material.
+
+Rules:
+
+```text
+placeholder must be documented and easy to detect
+placeholder must never include private keys
+placeholder must never include plaintext message content
+Phase B1 must not repurpose bridge code to store private E2EE secrets
+```
+
 ---
 
 ## 8. Forbidden implementation shortcuts

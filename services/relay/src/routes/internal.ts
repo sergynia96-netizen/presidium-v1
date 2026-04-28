@@ -29,7 +29,7 @@ function hasValidInternalAuthHeader(header: string | undefined): boolean {
 app.post('/users/sync-web-user', async (c) => {
   const authHeader = c.req.header('authorization') || c.req.header('Authorization');
   if (!hasValidInternalAuthHeader(authHeader)) {
-    return c.json({ success: false, error: 'Unauthorized', code: 'AUTH_MISSING' }, 401);
+    return c.json({ success: false, error: 'Unauthorized', code: 'IDENTITY_AUTH_INVALID' }, 401);
   }
 
   const body = await c.req.json().catch(() => null);
@@ -64,26 +64,50 @@ app.post('/users/sync-web-user', async (c) => {
   });
 
   if (!existing) {
-    const [created] = await db
-      .insert(users)
-      .values({
-        legacyWebUserId: parsed.data.legacyWebUserId,
-        email: parsed.data.email,
-        name: relayName,
-        avatar: relayAvatar,
-        publicKey: `pending:${parsed.data.legacyWebUserId}`,
-        updatedAt: now,
-      })
-      .returning({
-        id: users.id,
-      });
+    try {
+      const [created] = await db
+        .insert(users)
+        .values({
+          legacyWebUserId: parsed.data.legacyWebUserId,
+          email: parsed.data.email,
+          name: relayName,
+          avatar: relayAvatar,
+          /**
+           * Phase B1 transition placeholder.
+           * `users.public_key` is currently not-null in relay schema, but web identity bridge
+           * does not create or migrate E2EE key material.
+           * Real public key upload remains handled by the pre-key/e2ee flow.
+           */
+          publicKey: `pending:${parsed.data.legacyWebUserId}`,
+          updatedAt: now,
+        })
+        .returning({
+          id: users.id,
+        });
 
-    return c.json({
-      success: true,
-      data: {
-        relayUserId: created.id,
-      },
-    });
+      return c.json({
+        success: true,
+        data: {
+          relayUserId: created.id,
+        },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '';
+      if (
+        message.includes('users_legacy_web_user_id_idx') ||
+        message.includes('users_email_idx') ||
+        message.includes('duplicate key')
+      ) {
+        return c.json(
+          { success: false, error: 'Identity mapping conflict', code: 'IDENTITY_CONFLICT' },
+          409
+        );
+      }
+      return c.json(
+        { success: false, error: 'Failed to create relay identity', code: 'IDENTITY_CREATE_FAILED' },
+        500
+      );
+    }
   }
 
   const [updated] = await db

@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth';
 import { sign } from 'jsonwebtoken';
 import { authOptions } from '@/lib/auth-options';
 import { rateLimit } from '@/lib/rate-limit';
-import { resolveRelayIdentity } from '@/lib/server/relay-identity';
+import { RelayIdentityError, resolveRelayIdentity } from '@/lib/server/relay-identity';
 
 const EXPIRES_IN_SECONDS = 2 * 60 * 60;
 const RELAY_TOKEN_ISSUER = 'presidium-api';
@@ -58,7 +58,16 @@ export async function POST(request: NextRequest) {
       issuer: RELAY_TOKEN_ISSUER,
       audience: RELAY_TOKEN_AUDIENCE,
     });
-  } catch {
-    return NextResponse.json({ error: 'Failed to issue relay token' }, { status: 500 });
+  } catch (error) {
+    if (error instanceof RelayIdentityError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status }
+      );
+    }
+    return NextResponse.json(
+      { error: 'Failed to issue relay token', code: 'RELAY_TOKEN_ISSUE_FAILED' },
+      { status: 500 }
+    );
   }
 }
