@@ -10,6 +10,7 @@
  * 2026-04-28:
  * - Added outgoing adapter: EncryptedEnvelope -> production `chat.message`.
  * - Added recipientId to outgoing payload for relay transport fallback while web chats still use Prisma/cuid IDs.
+ * - Added structured pre-key bundle upload for production relay validation.
  * - Added `chat.ack` support so backend acknowledgements resolve pending sends.
  * - Added `chat.typing` and `chat.read` support for production relay events.
  * - Kept the E2E envelope opaque: relay receives JSON inside `encryptedPayload`.
@@ -636,9 +637,15 @@ class RelayE2EClient {
 
     const relayBody = {
       identityKey: serialized.identityKey,
-      signedPreKey: serialized.signedPreKey.publicKey,
-      signature: serialized.signedPreKey.signature,
-      oneTimePreKeys: serialized.oneTimePreKeys.map(k => k.publicKey),
+      signedPreKey: {
+        keyId: serialized.signedPreKey.keyId,
+        publicKey: serialized.signedPreKey.publicKey,
+        signature: serialized.signedPreKey.signature,
+      },
+      oneTimePreKeys: serialized.oneTimePreKeys.map((key) => ({
+        keyId: key.keyId,
+        publicKey: key.publicKey,
+      })),
     };
 
     const response = await this.fetchWithRelayAuth(`${this.config.httpBaseUrl}/api/keys/upload`, {
