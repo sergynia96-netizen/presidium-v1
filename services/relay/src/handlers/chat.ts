@@ -28,7 +28,7 @@ import { chatMembers, messages } from '../db/schema.js';
 
 const processedMessages = new Set<string>();
 const DEDUP_WINDOW_MS = 300_000;
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type ChatMessagePayload = {
   chatId: string;
@@ -44,6 +44,14 @@ type ChatMessagePayload = {
 setInterval(() => {
   processedMessages.clear();
 }, DEDUP_WINDOW_MS);
+
+function isUuid(value: string): boolean {
+  return UUID_REGEX.test(value);
+}
+
+function getDedupKey(senderId: string, messageId?: string): string | null {
+  return messageId ? `${senderId}:${messageId}` : null;
+}
 
 async function deliverTransportFallback(
   payload: ChatMessagePayload,
@@ -128,8 +136,24 @@ export async function handleChatMessage(
   const senderId = ws.userId!;
   const startTime = Date.now();
 
-  if (payload.id) {
-    const dedupKey = `${senderId}:${payload.id}`;
+  if (!payload.chatId || !payload.encryptedPayload || !payload.nonce) {
+    ws.send(
+      JSON.stringify({
+        type: 'chat.error',
+        payload: {
+          error: 'Missing required fields',
+          required: ['chatId', 'encryptedPayload', 'nonce'],
+          code: 'VALIDATION_ERROR',
+        },
+        timestamp: Date.now(),
+      }),
+      false
+    );
+    return;
+  }
+
+  const dedupKey = getDedupKey(senderId, payload.id);
+  if (dedupKey) {
     if (processedMessages.has(dedupKey)) {
       ws.send(
         JSON.stringify({
@@ -148,23 +172,7 @@ export async function handleChatMessage(
     processedMessages.add(dedupKey);
   }
 
-  if (!payload.chatId || !payload.encryptedPayload || !payload.nonce) {
-    ws.send(
-      JSON.stringify({
-        type: 'chat.error',
-        payload: {
-          error: 'Missing required fields',
-          required: ['chatId', 'encryptedPayload', 'nonce'],
-          code: 'VALIDATION_ERROR',
-        },
-        timestamp: Date.now(),
-      }),
-      false
-    );
-    return;
-  }
-
-  if (!UUID_REGEX.test(payload.chatId)) {
+  if (!isUuid(payload.chatId)) {
     await deliverTransportFallback(payload, senderId, ws, redis, 'NON_UUID_CHAT_ID');
     return;
   }
@@ -185,7 +193,7 @@ export async function handleChatMessage(
     return;
   }
 
-  let message;
+  let message: { id: string; createdAt: Date } | undefined;
   try {
     [message] = await db
       .insert(messages)
@@ -205,6 +213,11 @@ export async function handleChatMessage(
       });
   } catch (err) {
     console.error('[Chat] DB error storing message:', err);
+    await deliverTransportFallback(payload, senderId, ws, redis, 'MESSAGE_DB_ERROR');
+    return;
+  }
+
+  if (!message) {
     await deliverTransportFallback(payload, senderId, ws, redis, 'MESSAGE_DB_ERROR');
     return;
   }
@@ -364,6 +377,22 @@ export async function handleReadReceipt(
     return;
   }
 
+  if (!isUuid(payload.chatId)) {
+    ws.send(
+      JSON.stringify({
+        type: 'chat.read.ack',
+        payload: {
+          messageId: payload.messageId,
+          status: 'ignored_legacy_chat',
+          mode: 'transport_fallback',
+        },
+        timestamp: Date.now(),
+      }),
+      false
+    );
+    return;
+  }
+
   const membership = await db.query.chatMembers.findFirst({
     where: and(eq(chatMembers.chatId, payload.chatId), eq(chatMembers.userId, readerId)),
   });
@@ -448,7 +477,7 @@ export async function handleTyping(
 ): Promise<void> {
   const senderId = ws.userId!;
 
-  if (!payload.chatId) {
+  if (!payload.chatId || !isUuid(payload.chatId)) {
     return;
   }
 
