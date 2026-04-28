@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { sign } from 'jsonwebtoken';
 import { authOptions } from '@/lib/auth-options';
 import { rateLimit } from '@/lib/rate-limit';
+import { resolveRelayIdentity } from '@/lib/server/relay-identity';
 
 const EXPIRES_IN_SECONDS = 2 * 60 * 60;
 const RELAY_TOKEN_ISSUER = 'presidium-api';
@@ -34,10 +35,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'JWT secret is not configured' }, { status: 500 });
     }
 
+    const relayIdentity = await resolveRelayIdentity(session.user);
+
     const token = sign(
       {
-        sub: session.user.id,
-        id: session.user.id,
+        sub: relayIdentity.relayUserId,
+        id: relayIdentity.relayUserId,
+        legacyWebUserId: session.user.id,
         email: session.user.email || '',
       },
       secret,
