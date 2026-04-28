@@ -31,11 +31,22 @@ export interface ONNXResult {
   latencyMs: number;
 }
 
-let toxicityClassifier: any | null = null;
+type TransformersModule = {
+  pipeline: (task: string, model: string, options?: Record<string, unknown>) => Promise<(input: unknown, options?: Record<string, unknown>) => Promise<unknown>>;
+};
+
+let toxicityClassifier: ((input: unknown, options?: Record<string, unknown>) => Promise<unknown>) | null = null;
 let modelLoading = false;
 let modelError: Error | null = null;
 
 const MODEL_NAME = 'Xenova/toxic-bert';
+
+async function importTransformers(): Promise<TransformersModule> {
+  // @xenova/transformers is an optional runtime dependency for local moderation.
+  // Use runtime dynamic import to keep relay typecheck/build independent from it.
+  const dynamicImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<TransformersModule>;
+  return dynamicImport('@xenova/transformers');
+}
 
 /**
  * Initialize ONNX model (lazy loading)
@@ -53,8 +64,7 @@ export async function initONNX(): Promise<void> {
   try {
     const start = Date.now();
 
-    // Dynamic import — only loads if @xenova/transformers is installed
-    const { pipeline } = await import('@xenova/transformers');
+    const { pipeline } = await importTransformers();
     toxicityClassifier = await pipeline('text-classification', MODEL_NAME, {
       quantized: true,
       cache_dir: './.cache/transformers',
