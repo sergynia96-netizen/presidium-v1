@@ -2,14 +2,14 @@
 
 **Date:** 2026-04-28  
 **Maintainer:** Sergey Karnaukh  
-**Scope:** GitHub Actions monorepo validation gate  
+**Scope:** GitHub Actions active stack validation gate  
 **Workflow:** `.github/workflows/ci.yml`
 
 ---
 
 ## 1. Purpose
 
-The CI workflow is a baseline guardrail for the current monorepo. It is designed to catch obvious breakage on every push and pull request to `main`.
+The CI workflow is a baseline guardrail for the current active Presidium stack. It is designed to catch obvious breakage on every push and pull request to `main`.
 
 It is not a replacement for the two-user realtime/E2E browser smoke test. The browser smoke test remains documented separately in:
 
@@ -19,7 +19,7 @@ docs/qa/realtime-e2e-smoke-test.md
 
 ---
 
-## 2. Current CI checks
+## 2. Intended active-stack CI checks
 
 The workflow runs on:
 
@@ -28,51 +28,54 @@ push to main
 pull_request to main
 ```
 
-It validates:
+The intended baseline validation scope is the active MVP path:
+
+```text
+shared packages
+web app
+services/relay
+Docker Compose config
+```
+
+Target commands:
 
 ```text
 pnpm install --frozen-lockfile
 @presidium/shared-types build
 @presidium/shared-api build
 @presidium/shared-crypto build
+@presidium/shared-ui build
 @presidium/relay typecheck
 @presidium/relay build
-root monorepo typecheck
-root monorepo build
+@presidium/web typecheck
+@presidium/web build
 docker compose config
 ```
+
+Desktop and mobile packages are intentionally outside the first CI gate until their platform-specific dependency chains are stabilized.
 
 ---
 
 ## 3. Why shared packages build first
 
-The relay depends on workspace packages:
+The relay and web app depend on workspace packages:
 
 ```text
 @presidium/shared-types
 @presidium/shared-api
+@presidium/shared-ui
 @presidium/shared-crypto
 ```
 
-Those packages expose `dist/*` files through their package metadata. Building them before relay reduces false failures and mirrors the production relay Dockerfile strategy.
+Several workspace packages expose `dist/*` files through package metadata. Building them before relay/web reduces false failures and mirrors the production relay Dockerfile strategy.
 
 ---
 
-## 4. CI environment secrets
+## 4. CI environment placeholders
 
-The workflow uses non-production placeholder secrets only for build/config validation:
+The workflow uses non-production placeholder values only for build/config validation. These values are not production secrets and must not be reused outside CI.
 
-```text
-JWT_SECRET
-NEXTAUTH_SECRET
-DB_PASSWORD
-REDIS_PASSWORD
-S3_ACCESS_KEY
-S3_SECRET_KEY
-MINIO_ROOT_PASSWORD
-```
-
-These values are not production secrets and must not be reused outside CI.
+The real production deployment must provide separate rotated values through the deployment environment.
 
 ---
 
@@ -86,6 +89,8 @@ browser smoke test
 real two-user WebSocket integration test
 real Redis offline queue integration test
 real Postgres migrations against a live DB
+desktop Tauri build
+mobile Capacitor build
 ```
 
 Reason: the project is still in a transition phase between legacy root Prisma/SQLite web data and canonical relay/Postgres data. The first CI gate should be fast, deterministic, and cheap.
@@ -94,10 +99,10 @@ Reason: the project is still in a transition phase between legacy root Prisma/SQ
 
 ## 6. Next CI phases
 
-### Phase 1 — current baseline
+### Phase 1 — active stack baseline
 
 ```text
-install → shared builds → relay typecheck/build → monorepo typecheck/build → compose config
+install → shared builds → relay typecheck/build → web typecheck/build → compose config
 ```
 
 ### Phase 2 — relay container build
@@ -146,14 +151,25 @@ offline queue drain
 
 This phase should only start after the canonical data migration plan is underway.
 
+### Phase 5 — platform workflows
+
+Add separate workflows for:
+
+```text
+desktop Tauri build
+mobile Capacitor build
+```
+
+These should not block the web/relay MVP gate until platform apps are actively maintained.
+
 ---
 
 ## 7. Rule
 
-A green CI run means:
+A green active-stack CI run means:
 
 ```text
-the repository builds and the static validation gate passed
+the web/relay MVP stack builds and the static validation gate passed
 ```
 
 It does not yet mean:
