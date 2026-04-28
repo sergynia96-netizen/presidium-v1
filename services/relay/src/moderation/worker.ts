@@ -44,7 +44,7 @@ export function startModerationWorker(redis: Redis): Worker {
     'silent-claw',
     async (job: Job) => {
       const startTime = Date.now();
-      const { messageId, senderId, chatId, messageType, contentHint } = job.data;
+      const { messageId, senderId, messageType, contentHint } = job.data;
 
       console.log(`[SilentClaw] Processing job ${job.id}, message ${messageId}`);
 
@@ -94,8 +94,6 @@ export function startModerationWorker(redis: Redis): Worker {
     {
       connection: redis,
       concurrency: 10,
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 1000 },
     }
   );
 
