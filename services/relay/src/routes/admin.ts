@@ -115,7 +115,7 @@ adminRouter.put(
       .update(users)
       .set({ strikes: body.strikes, updatedAt: new Date() })
       .where(eq(users.id, targetId))
-      .returning({ id: true, strikes: true });
+      .returning({ id: users.id, strikes: users.strikes });
 
     return c.json({ success: true, user: updated });
   }
@@ -146,7 +146,7 @@ adminRouter.put(
         updatedAt: new Date(),
       })
       .where(eq(users.id, targetId))
-      .returning({ id: true, status: true });
+      .returning({ id: users.id, status: users.status });
 
     return c.json({ success: true, user: updated });
   }
