@@ -11,13 +11,17 @@ export type AuthUser = {
   name: string;
   strikes: number;
   createdAt: Date;
+  source?: 'relay' | 'legacy-web';
 };
 
 export interface AuthContext {
   userId: string;
   email: string;
   tokenPayload: TokenPayload;
+  source?: 'relay' | 'legacy-web';
 }
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function parseBearerToken(header: string | undefined): string | null {
   if (!header) {
@@ -28,6 +32,92 @@ function parseBearerToken(header: string | undefined): string | null {
     return null;
   }
   return token;
+}
+
+function isUuid(value: string): boolean {
+  return UUID_REGEX.test(value);
+}
+
+function setLegacyWebAuthContext(c: unknown, payload: TokenPayload): void {
+  const ctx = c as { set: (key: string, value: unknown) => void };
+  const now = new Date();
+  const email = typeof payload.email === 'string' ? payload.email : '';
+
+  ctx.set('auth', {
+    userId: payload.sub,
+    email,
+    tokenPayload: payload,
+    source: 'legacy-web',
+  } as AuthContext);
+
+  ctx.set('user', {
+    id: payload.sub,
+    email,
+    name: email || payload.sub,
+    strikes: 0,
+    createdAt: now,
+    source: 'legacy-web',
+  } as AuthUser);
+}
+
+async function setRelayAuthContext(c: unknown, payload: TokenPayload): Promise<'ok' | Response> {
+  const ctx = c as {
+    set: (key: string, value: unknown) => void;
+    json: (body: unknown, status?: number) => Response;
+  };
+
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, payload.sub),
+    columns: {
+      id: true,
+      email: true,
+      name: true,
+      strikes: true,
+      createdAt: true,
+      status: true,
+      deletedAt: true,
+    },
+  });
+
+  if (!user || user.deletedAt) {
+    return ctx.json(
+      {
+        success: false,
+        error: 'User not found',
+        code: 'AUTH_USER_NOT_FOUND',
+      },
+      401
+    );
+  }
+
+  if (user.status === 'banned') {
+    return ctx.json(
+      {
+        success: false,
+        error: 'Account banned',
+        code: 'AUTH_BANNED',
+      },
+      403
+    );
+  }
+
+  ctx.set('auth', {
+    userId: user.id,
+    email: user.email,
+    tokenPayload: payload,
+    source: 'relay',
+  } as AuthContext);
+
+  ctx.set('user', {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    strikes: user.strikes,
+    createdAt: user.createdAt,
+    source: 'relay',
+  } as AuthUser);
+
+  return 'ok';
 }
 
 export const authMiddleware = createMiddleware(async (c, next) => {
@@ -61,54 +151,20 @@ export const authMiddleware = createMiddleware(async (c, next) => {
       );
     }
 
-    const user = await db.query.users.findFirst({
-      where: eq(users.id, sub),
-      columns: {
-        id: true,
-        email: true,
-        name: true,
-        strikes: true,
-        createdAt: true,
-        status: true,
-        deletedAt: true,
-      },
-    });
-
-    if (!user || user.deletedAt) {
-      return c.json(
-        {
-          success: false,
-          error: 'User not found',
-          code: 'AUTH_USER_NOT_FOUND',
-        },
-        401
-      );
+    if (!isUuid(sub)) {
+      // Compatibility path for the current root web app.
+      // Its Prisma users use cuid() identifiers, while the relay Postgres users table
+      // uses UUID. We still accept the cryptographically valid relay token and mark
+      // the auth source so DB-native routes can migrate intentionally.
+      setLegacyWebAuthContext(c, payload);
+      await next();
+      return;
     }
 
-    if (user.status === 'banned') {
-      return c.json(
-        {
-          success: false,
-          error: 'Account banned',
-          code: 'AUTH_BANNED',
-        },
-        403
-      );
+    const result = await setRelayAuthContext(c, payload);
+    if (result !== 'ok') {
+      return result;
     }
-
-    c.set('auth', {
-      userId: user.id,
-      email: user.email,
-      tokenPayload: payload,
-    } as AuthContext);
-
-    c.set('user', {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      strikes: user.strikes,
-      createdAt: user.createdAt,
-    } as AuthUser);
 
     await next();
   } catch (err) {
@@ -141,33 +197,16 @@ export const optionalAuthMiddleware = createMiddleware(async (c, next) => {
       return;
     }
 
-    const user = await db.query.users.findFirst({
-      where: eq(users.id, payload.sub),
-      columns: {
-        id: true,
-        email: true,
-        name: true,
-        strikes: true,
-        createdAt: true,
-        status: true,
-        deletedAt: true,
-      },
-    });
+    if (!isUuid(payload.sub)) {
+      setLegacyWebAuthContext(c, payload);
+      await next();
+      return;
+    }
 
-    if (user && !user.deletedAt && user.status !== 'banned') {
-      c.set('auth', {
-        userId: user.id,
-        email: user.email,
-        tokenPayload: payload,
-      } as AuthContext);
-
-      c.set('user', {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        strikes: user.strikes,
-        createdAt: user.createdAt,
-      } as AuthUser);
+    const result = await setRelayAuthContext(c, payload);
+    if (result !== 'ok') {
+      await next();
+      return;
     }
   } catch {
     // optional auth ignores invalid token
