@@ -14,6 +14,12 @@
  * - Error handling and recovery
  */
 
+/*
+ * CHANGELOG
+ * 2026-04-28:
+ * - Pass chatId into RelayE2EClient so queued outgoing messages use production `chat.message`.
+ */
+
 import { sessionManager } from './session-manager';
 import { encryptMessage, decryptMessage, type EncryptedEnvelope } from './encrypt';
 import { saveMessage, type StoredMessage } from './store';
@@ -198,8 +204,8 @@ class MessageQueue {
     message.storedMessage = storedMessage;
     message.status = 'sent';
 
-    // Step 4: Send via relay
-    await relayClient.sendEncryptedMessage(envelope);
+    // Step 4: Send via production relay chat protocol
+    await relayClient.sendEncryptedMessage(message.chatId, envelope);
 
     // Step 5: Record success
     await sessionManager.recordSuccess(message.recipientId);
