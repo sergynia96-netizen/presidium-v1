@@ -22,8 +22,13 @@ jobs:
       CI: true
       NEXT_TELEMETRY_DISABLED: 1
       NODE_ENV: test
+      DATABASE_URL: postgresql://presidium:ci_db_password@localhost:5432/presidium?schema=public
+      REDIS_URL: redis://:ci_redis_password@localhost:6379
       JWT_SECRET: ci-jwt-secret-minimum-32-characters
       NEXTAUTH_SECRET: ci-nextauth-secret-minimum-32-chars
+      NEXTAUTH_URL: http://localhost:3000
+      NEXT_PUBLIC_RELAY_HTTP_URL: http://localhost:3001
+      NEXT_PUBLIC_RELAY_WS_URL: ws://localhost:3001/ws
       DB_PASSWORD: ci_db_password
       REDIS_PASSWORD: ci_redis_password
       S3_ACCESS_KEY: ci_access_key
