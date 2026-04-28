@@ -1,29 +1,21 @@
 /**
  * Relay E2E Client
  *
- * HTTP + WebSocket client for the relay backend.
- * Handles:
- * - Pre-key bundle upload/download
- * - Encrypted message delivery
- * - WebSocket connection management
- * - Message acknowledgment
- * - Presence updates
- * - Typing indicators
- *
- * Architecture:
- * - HTTP REST for pre-key management and initial setup
- * - WebSocket for real-time encrypted message delivery
- * - Automatic reconnection with exponential backoff
- * - Message queue for offline delivery
+ * HTTP + WebSocket client for the production relay backend.
+ * Bridges the client-side E2E envelope model to the relay chat protocol.
  */
 
 /*
- * CHANGELOG (Codex)
+ * CHANGELOG
+ * 2026-04-28:
+ * - Added outgoing adapter: EncryptedEnvelope -> production `chat.message`.
+ * - Added `chat.ack` support so backend acknowledgements resolve pending sends.
+ * - Kept the E2E envelope opaque: relay receives JSON inside `encryptedPayload`.
+ *
  * 2026-04-17:
  * - Added stronger auth backoff and auth-error classification.
  * - Added cooldown on `/api/relay/token` auth failures (401/403) to stop retry storms.
  * - Prevented endless reconnect loops when token/auth is invalid.
- * - Kept reconnect reset only after explicit relay `connected` auth confirmation.
  */
 
 import { clearRelayAccessToken, getRelayAccessToken, setRelayAccessToken } from '../relay-auth';
@@ -42,33 +34,42 @@ export interface RelayConfig {
   pongTimeoutMs: number;
 }
 
-export interface RelayMessageEnvelope {
-  type: 'encrypted-message';
-  version: 1;
-  senderId: string;
-  recipientId: string;
-  messageId: string;
-  timestamp: number;
-  ciphertext: string;
-  iv: string;
-  tag: string;
-  header: {
-    publicKey: string;
-    counter: number;
-    previousCounter: number;
-  };
-  x3dhInitiate?: {
-    identityKey: string;
-    ephemeralKey: string;
-    signedPreKeyId: number;
-    oneTimePreKeyId?: number;
-  };
-}
+export type RelayMessageEnvelope = EncryptedEnvelope;
 
 export interface RelayAckMessage {
   type: 'ack';
   messageId: string;
   receivedAt: number;
+}
+
+export interface RelayChatAckMessage {
+  type: 'chat.ack';
+  payload: {
+    messageId?: string;
+    clientId?: string;
+    status?: string;
+    deliveredCount?: number;
+    offlineCount?: number;
+    totalMembers?: number;
+    processingTimeMs?: number;
+  };
+  timestamp?: number;
+}
+
+export interface RelayChatMessage {
+  type: 'chat.message';
+  payload: {
+    id: string;
+    chatId: string;
+    senderId: string;
+    encryptedPayload: string;
+    nonce: string;
+    type?: string;
+    replyTo?: string;
+    createdAt?: number;
+    clientTimestamp?: number;
+  };
+  timestamp?: number;
 }
 
 export interface RelayTypingMessage {
@@ -87,12 +88,17 @@ export interface RelayPresenceMessage {
 
 export type RelayIncomingMessage =
   | RelayMessageEnvelope
+  | RelayChatMessage
   | RelayAckMessage
+  | RelayChatAckMessage
   | RelayTypingMessage
   | RelayPresenceMessage
   | { type: 'pong' }
   | { type: 'connected' }
-  | { type: 'error'; message: string };
+  | { type: 'auth.success'; payload?: Record<string, unknown> }
+  | { type: 'auth.required'; payload?: Record<string, unknown> }
+  | { type: 'auth.error'; payload?: { error?: string; message?: string } }
+  | { type: 'error'; message?: string; payload?: { message?: string; code?: string } };
 
 export type RelayEvent =
   | { type: 'message'; data: RelayMessageEnvelope }
@@ -105,8 +111,6 @@ export type RelayEvent =
 
 export type RelayEventHandler = (event: RelayEvent) => void;
 
-// ─── Default Config ─────────────────────────────────────────────────────────
-
 const DEFAULT_CONFIG: RelayConfig = {
   httpBaseUrl: process.env.NEXT_PUBLIC_RELAY_HTTP_URL || 'http://127.0.0.1:3001',
   wsBaseUrl: process.env.NEXT_PUBLIC_RELAY_WS_URL || 'ws://127.0.0.1:3001/ws',
@@ -116,6 +120,7 @@ const DEFAULT_CONFIG: RelayConfig = {
   pingIntervalMs: 30000,
   pongTimeoutMs: 10000,
 };
+
 const AUTH_RETRY_BACKOFF_MS = 120_000;
 const AUTH_HANDSHAKE_TIMEOUT_MS = 10_000;
 
@@ -123,7 +128,17 @@ function isAuthRelatedMessage(message: string): boolean {
   return /401|403|unauthorized|forbidden|auth|token/i.test(message);
 }
 
-// ─── Relay Client ────────────────────────────────────────────────────────────
+function parseRelayChatMessage(message: RelayChatMessage): RelayMessageEnvelope | null {
+  try {
+    const envelope = JSON.parse(message.payload.encryptedPayload) as RelayMessageEnvelope;
+    if (envelope?.type !== 'encrypted-message' || envelope.version !== 1) {
+      return null;
+    }
+    return envelope;
+  } catch {
+    return null;
+  }
+}
 
 class RelayE2EClient {
   private config: RelayConfig;
@@ -175,7 +190,6 @@ class RelayE2EClient {
       const payloadJson = atob(payloadBase64.replace(/-/g, '+').replace(/_/g, '/'));
       const payload = JSON.parse(payloadJson) as { exp?: number };
       if (typeof payload.exp !== 'number') return false;
-      // Refresh a little earlier to avoid edge-expiry races.
       return payload.exp * 1000 <= Date.now() + 60_000;
     } catch {
       return true;
@@ -238,6 +252,7 @@ class RelayE2EClient {
       }
       throw error;
     }
+
     const headers = new Headers(init.headers || {});
     headers.set('Authorization', `Bearer ${token}`);
 
@@ -251,7 +266,6 @@ class RelayE2EClient {
       return response;
     }
 
-    // Token could be stale/revoked. Refresh once and retry.
     clearRelayAccessToken();
     const refreshedToken = await this.ensureRelayToken(true);
     const retryHeaders = new Headers(init.headers || {});
@@ -271,11 +285,6 @@ class RelayE2EClient {
     return response;
   }
 
-  // ─── Connection Management ──────────────────────────────────────────────
-
-  /**
-   * Connect to the relay via WebSocket (uses shared WebSocketManager).
-   */
   connect(): Promise<void> {
     if (this.isConnected) return Promise.resolve();
     if (this.isConnecting) return this.waitForConnection();
@@ -291,18 +300,14 @@ class RelayE2EClient {
 
       void (async () => {
         try {
-          // Get or create shared WebSocketManager
           this.wsManager = getWebSocketManager(this.config.wsBaseUrl);
 
-          // Subscribe to messages
           this.unsubscribeMessage = this.wsManager.onMessage((raw) => {
             this.handleMessage(JSON.stringify(raw));
           });
 
-          // Subscribe to state changes
           this.unsubscribeState = this.wsManager.onStateChange((state) => {
             if (state === 'connected') {
-              // Authenticate once connected
               void this.authenticate();
             } else if (state === 'disconnected') {
               this.isConnected = false;
@@ -311,7 +316,6 @@ class RelayE2EClient {
             }
           });
 
-          // Connect
           await this.wsManager.connect();
         } catch (error) {
           this.isConnecting = false;
@@ -321,9 +325,6 @@ class RelayE2EClient {
     });
   }
 
-  /**
-   * Authenticate with the relay server.
-   */
   private async authenticate(): Promise<void> {
     try {
       const token = await this.ensureRelayToken();
@@ -343,17 +344,10 @@ class RelayE2EClient {
     }
   }
 
-  /**
-   * Disconnect from the relay.
-   */
   disconnect(): void {
-    // Cancel any pending connect without propagating an error.
-    // The caller is typically a React cleanup (Strict Mode unmount)
-    // and should not treat this as a real failure.
     this.pendingConnectResolver = null;
     this.pendingConnectRejecter = null;
 
-    // Unsubscribe from events
     if (this.unsubscribeMessage) {
       this.unsubscribeMessage();
       this.unsubscribeMessage = null;
@@ -363,16 +357,11 @@ class RelayE2EClient {
       this.unsubscribeState = null;
     }
 
-    // Note: We don't disconnect the shared manager here
-    // Other components might still need it
     this.wsManager = null;
     this.isConnected = false;
     this.isConnecting = false;
   }
 
-  /**
-   * Wait for connection to be established.
-   */
   private waitForConnection(): Promise<void> {
     return new Promise((resolve, reject) => {
       const startedAt = Date.now();
@@ -388,15 +377,12 @@ class RelayE2EClient {
         if (Date.now() - startedAt > AUTH_HANDSHAKE_TIMEOUT_MS + 5000) {
           reject(new Error('Timed out waiting for relay connection'));
           return;
-        } else {
-          setTimeout(check, 100);
         }
+        setTimeout(check, 100);
       };
       check();
     });
   }
-
-  // ─── Message Handling ───────────────────────────────────────────────────
 
   private handleMessage(data: string): void {
     try {
@@ -407,10 +393,37 @@ class RelayE2EClient {
           this.emit({ type: 'message', data: parsed as RelayMessageEnvelope });
           break;
 
+        case 'chat.message': {
+          const envelope = parseRelayChatMessage(parsed as RelayChatMessage);
+          if (!envelope) {
+            this.emit({ type: 'error', error: new Error('Invalid encrypted relay chat payload') });
+            break;
+          }
+          this.emit({ type: 'message', data: envelope });
+          break;
+        }
+
         case 'ack':
           this.emit({ type: 'ack', data: parsed as RelayAckMessage });
           this.handleAck(parsed as RelayAckMessage);
           break;
+
+        case 'chat.ack': {
+          const ack = parsed as RelayChatAckMessage;
+          const messageId = ack.payload.clientId || ack.payload.messageId;
+          if (!messageId) {
+            this.emit({ type: 'error', error: new Error('Relay chat acknowledgement is missing message id') });
+            break;
+          }
+          const normalizedAck: RelayAckMessage = {
+            type: 'ack',
+            messageId,
+            receivedAt: ack.timestamp || Date.now(),
+          };
+          this.emit({ type: 'ack', data: normalizedAck });
+          this.handleAck(normalizedAck);
+          break;
+        }
 
         case 'typing':
           this.emit({ type: 'typing', data: parsed as RelayTypingMessage });
@@ -421,11 +434,11 @@ class RelayE2EClient {
           break;
 
         case 'pong':
-          // Handled by WebSocketManager
+        case 'auth.required':
           break;
 
         case 'connected':
-          // Reset state only after successful relay auth.
+        case 'auth.success':
           this.isConnected = true;
           this.isConnecting = false;
           this.clearAuthRetryBackoff();
@@ -434,23 +447,28 @@ class RelayE2EClient {
           console.log('[RelayE2EClient] Auth response:', JSON.stringify(parsed));
           break;
 
+        case 'auth.error': {
+          const errorMessage = parsed.payload?.message || parsed.payload?.error || 'Relay authentication failed';
+          clearRelayAccessToken();
+          this.activateAuthRetryBackoff();
+          this.isConnected = false;
+          this.isConnecting = false;
+          this.rejectPendingConnect(new Error(String(errorMessage)));
+          this.emit({ type: 'error', error: new Error(String(errorMessage)) });
+          break;
+        }
+
         case 'error': {
-          const parsedAny = parsed as any;
-          const errorMessage =
-            parsedAny?.message ||
-            parsedAny?.payload?.message ||
-            'Relay error';
-          const errorCode = parsedAny?.payload?.code;
+          const errorMessage = parsed.message || parsed.payload?.message || 'Relay error';
+          const errorCode = parsed.payload?.code;
           console.log('[RelayE2EClient] Error response:', JSON.stringify(parsed));
 
           if (errorCode === 'auth_required' || /auth|token|unauthorized/i.test(String(errorMessage))) {
             clearRelayAccessToken();
-            // Stop auto-reconnect storm when relay auth is invalid.
             this.activateAuthRetryBackoff();
             this.isConnected = false;
             this.isConnecting = false;
             this.rejectPendingConnect(new Error(String(errorMessage)));
-            // Disconnect will be handled by WebSocketManager
           }
 
           this.emit({ type: 'error', error: new Error(String(errorMessage)) });
@@ -473,13 +491,11 @@ class RelayE2EClient {
     }
   }
 
-  // ─── Sending Messages ───────────────────────────────────────────────────
-
   /**
-   * Send an encrypted message via the relay.
-   * Returns a promise that resolves when the message is acknowledged.
+   * Send an encrypted message via the production relay chat protocol.
+   * The E2E envelope remains opaque to the relay and is stored inside encryptedPayload.
    */
-  async sendEncryptedMessage(envelope: EncryptedEnvelope): Promise<void> {
+  async sendEncryptedMessage(chatId: string, envelope: EncryptedEnvelope): Promise<void> {
     if (!this.isConnected) {
       await this.connect();
     }
@@ -502,15 +518,15 @@ class RelayE2EClient {
         },
       });
 
-      // Send in the format expected by relay backend:
-      // { type: 'relay.envelope', payload: { type, to, content, timestamp, moderation } }
       const sent = this.wsManager?.send({
-        type: 'relay.envelope',
+        type: 'chat.message',
         payload: {
-          type: 'message',
-          to: envelope.recipientId,
-          content: JSON.stringify(envelope),
-          timestamp: envelope.timestamp,
+          chatId,
+          encryptedPayload: JSON.stringify(envelope),
+          nonce: envelope.iv,
+          type: 'text',
+          clientTimestamp: envelope.timestamp,
+          id: envelope.messageId,
         },
       });
 
@@ -522,9 +538,6 @@ class RelayE2EClient {
     });
   }
 
-  /**
-   * Send a typing indicator.
-   */
   sendTyping(chatId: string, isTyping: boolean): void {
     if (!this.isConnected) return;
 
@@ -534,9 +547,6 @@ class RelayE2EClient {
     });
   }
 
-  /**
-   * Send a read receipt.
-   */
   sendReadReceipt(messageId: string, chatId: string): void {
     if (!this.isConnected) return;
 
@@ -547,15 +557,9 @@ class RelayE2EClient {
     });
   }
 
-  // ─── Pre-Key Bundle Management ──────────────────────────────────────────
-
-  /**
-   * Upload pre-key bundle to the relay.
-   */
   async uploadPreKeyBundle(bundle: PreKeyBundle): Promise<void> {
     const serialized = serializePreKeyBundle(bundle);
 
-    // Convert from client SerializedPreKeyBundle to relay PreKeyUploadBody format
     const relayBody = {
       identityKey: serialized.identityKey,
       signedPreKey: serialized.signedPreKey.publicKey,
@@ -576,9 +580,6 @@ class RelayE2EClient {
     }
   }
 
-  /**
-   * Fetch a user's pre-key bundle from the relay.
-   */
   async fetchPreKeyBundle(userId: string): Promise<PreKeyBundle | null> {
     const response = await this.fetchWithRelayAuth(`${this.config.httpBaseUrl}/api/keys/${userId}`);
 
@@ -592,8 +593,6 @@ class RelayE2EClient {
 
     const data = await response.json() as Record<string, unknown>;
 
-    // Normalize relay API response to match SerializedPreKeyBundle format
-    // Server may return `preKeyId` instead of `keyId` for one-time pre-keys
     const rawOtpks = Array.isArray(data.oneTimePreKeys) ? data.oneTimePreKeys : [];
     const normalizedBundle: SerializedPreKeyBundle = {
       identityKey: String(data.identityKey || ''),
@@ -611,11 +610,6 @@ class RelayE2EClient {
     return deserializePreKeyBundle(normalizedBundle);
   }
 
-  // ─── Event System ───────────────────────────────────────────────────────
-
-  /**
-   * Subscribe to relay events.
-   */
   on(handler: RelayEventHandler): () => void {
     this.handlers.add(handler);
     return () => {
@@ -623,9 +617,6 @@ class RelayE2EClient {
     };
   }
 
-  /**
-   * Emit an event to all handlers.
-   */
   private emit(event: RelayEvent): void {
     for (const handler of this.handlers) {
       try {
@@ -636,18 +627,10 @@ class RelayE2EClient {
     }
   }
 
-  // ─── Status ─────────────────────────────────────────────────────────────
-
-  /**
-   * Check if connected to the relay.
-   */
   get connected(): boolean {
     return this.isConnected;
   }
 
-  /**
-   * Get connection status.
-   */
   getStatus(): {
     connected: boolean;
     connecting: boolean;
@@ -660,7 +643,5 @@ class RelayE2EClient {
     };
   }
 }
-
-// ─── Singleton ───────────────────────────────────────────────────────────────
 
 export const relayClient = new RelayE2EClient();
