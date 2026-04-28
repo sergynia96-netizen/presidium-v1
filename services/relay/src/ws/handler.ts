@@ -119,7 +119,6 @@ async function authenticateSocket(
     false
   );
 
-  // Backward-compatible signal for the existing web RelayE2EClient.
   ws.send(
     JSON.stringify({
       type: 'connected',
@@ -144,9 +143,6 @@ export const wsHandler = {
     });
 
     try {
-      // Query-token authentication is still supported for production clients.
-      // Missing token is allowed so browser clients can authenticate immediately
-      // after connect with `{ type: 'auth', payload: { token } }`.
       if (token) {
         await verifyToken(token);
       }
@@ -232,11 +228,11 @@ export const wsHandler = {
       const text = Buffer.from(message).toString('utf-8');
       const envelope = JSON.parse(text);
 
-      if (!envelope.type || !envelope.payload) {
+      if (!envelope.type) {
         ws.send(
           JSON.stringify({
             type: 'error',
-            payload: { error: 'Invalid message format: missing type or payload' },
+            payload: { error: 'Invalid message format: missing type' },
             timestamp: Date.now(),
           }),
           false
@@ -244,10 +240,13 @@ export const wsHandler = {
         return;
       }
 
+      const messageType = String(envelope.type);
+      const payload = envelope.payload && typeof envelope.payload === 'object' ? envelope.payload : {};
+
       if (!ws.isAuthenticated || !ws.userId) {
-        if (envelope.type === 'auth' && typeof envelope.payload.token === 'string') {
+        if (messageType === 'auth' && typeof payload.token === 'string') {
           try {
-            await authenticateSocket(ws, envelope.payload.token, redis);
+            await authenticateSocket(ws, payload.token, redis);
           } catch (err) {
             console.error('[WS] Post-connect auth failed:', err);
             ws.send(
@@ -277,7 +276,7 @@ export const wsHandler = {
         return;
       }
 
-      await routeMessage(envelope, ws, redis);
+      await routeMessage({ ...envelope, payload }, ws, redis);
     } catch (err) {
       console.error('[WS] Message handling error:', err);
       ws.send(
