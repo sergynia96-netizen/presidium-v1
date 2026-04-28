@@ -18,6 +18,7 @@ import chatRoutes from './routes/chats.js';
 import contactsRouter from './routes/contacts.js';
 import cronRouter from './routes/cron.js';
 import feedRouter from './routes/feed.js';
+import keysRouter from './routes/keys.js';
 import mediaRouter from './routes/media.js';
 import storiesRouter from './routes/stories.js';
 import userRoutes from './routes/users.js';
@@ -58,6 +59,11 @@ httpApp.route('/feed', feedRouter);
 httpApp.route('/media', mediaRouter);
 httpApp.route('/contacts', contactsRouter);
 httpApp.route('/cron', cronRouter);
+
+// Current root web client calls /api/keys/*.
+// Relay-native clients may use /keys/* once the web app is fully migrated.
+httpApp.route('/api/keys', keysRouter);
+httpApp.route('/keys', keysRouter);
 
 httpApp.route('/marketplace', marketplaceRouter);
 httpApp.route('/books', booksRouter);
@@ -303,4 +309,3 @@ process.on('SIGINT', () => {
 setInterval(() => {
   redis.set('ws:connection_count', String(getLocalConnectionCount())).catch(() => undefined);
 }, 10_000);
-
