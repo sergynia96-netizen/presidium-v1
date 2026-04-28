@@ -5,6 +5,8 @@ import { authOptions } from '@/lib/auth-options';
 import { rateLimit } from '@/lib/rate-limit';
 
 const EXPIRES_IN_SECONDS = 2 * 60 * 60;
+const RELAY_TOKEN_ISSUER = 'presidium-api';
+const RELAY_TOKEN_AUDIENCE = 'presidium-relay';
 
 export async function POST(request: NextRequest) {
   try {
@@ -36,18 +38,21 @@ export async function POST(request: NextRequest) {
       {
         sub: session.user.id,
         id: session.user.id,
-        email: session.user.email || null,
+        email: session.user.email || '',
       },
       secret,
       {
         expiresIn: EXPIRES_IN_SECONDS,
-        issuer: 'presidium-web',
+        issuer: RELAY_TOKEN_ISSUER,
+        audience: RELAY_TOKEN_AUDIENCE,
       },
     );
 
     return NextResponse.json({
       token,
       expiresIn: EXPIRES_IN_SECONDS,
+      issuer: RELAY_TOKEN_ISSUER,
+      audience: RELAY_TOKEN_AUDIENCE,
     });
   } catch {
     return NextResponse.json({ error: 'Failed to issue relay token' }, { status: 500 });
