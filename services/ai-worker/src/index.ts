@@ -13,10 +13,10 @@
  * Runs as a separate process, communicates via Redis (BullMQ queues).
  */
 
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
 import { Worker } from 'bullmq';
-import { runRegexCheck, quickRegexCheck, getONNXInfo } from '@presidium/relay/moderation/rules';
-import { runONNXCheck, initONNX } from '@presidium/relay/moderation/onnx';
+import { runRegexCheck } from './moderation/rules.js';
+import { runONNXCheck, initONNX, getONNXInfo } from './moderation/onnx.js';
 
 // === CONFIG ===
 
@@ -84,12 +84,12 @@ async function main() {
   console.log('[AI-Worker] Starting Presidium AI Worker...');
 
   const redis = new Redis(REDIS_URL, { maxRetriesPerRequest: null });
-  redis.on('error', (err) => console.error('[AI-Worker] Redis error:', err));
+  redis.on('error', (err: Error) => console.error('[AI-Worker] Redis error:', err));
   redis.on('connect', () => console.log('[AI-Worker] Connected to Redis'));
 
   // Initialize ONNX models
   console.log('[AI-Worker] Initializing ONNX models...');
-  await initONNX().catch(err => console.warn('[AI-Worker] ONNX init failed:', err));
+  await initONNX().catch((err: Error) => console.warn('[AI-Worker] ONNX init failed:', err));
   console.log('[AI-Worker] ONNX status:', getONNXInfo());
 
   // === Silent Claw Worker ===
