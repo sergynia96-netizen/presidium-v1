@@ -3,6 +3,10 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { db } from '@/lib/db';
 import { rateLimit } from '@/lib/rate-limit';
+import {
+  CanonicalPrivateChatError,
+  createCanonicalPrivateChat,
+} from '@/lib/server/relay-private-chat';
 import { z } from 'zod';
 
 const createChatSchema = z
@@ -171,76 +175,35 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const targetUser = await db.user.findUnique({
-        where: { id: targetId },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          avatar: true,
-          status: true,
-        },
-      });
+      try {
+        const canonical = await createCanonicalPrivateChat(session.user, targetId);
 
-      if (!targetUser) {
         return NextResponse.json(
-          { error: 'Target user not found' },
-          { status: 404 },
+          {
+            success: true,
+            chat: {
+              id: canonical.chatId,
+              type: 'private',
+              isEncrypted: true,
+              encryptionType: 'e2e',
+              mode: 'canonical_postgres',
+              memberIds: canonical.memberIds,
+            },
+            reused: canonical.reused,
+          },
+          { status: canonical.reused ? 200 : 201 },
         );
-      }
-
-      // Reuse existing private chat between the same two users.
-      const existingPrivateCandidates = await db.chat.findMany({
-        where: {
-          type: 'private',
-          members: {
-            some: { userId: session.user.id },
-          },
-          AND: [
-            {
-              members: {
-                some: { userId: targetId },
-              },
-            },
-          ],
-        },
-        include: {
-          members: {
-            include: {
-              user: {
-                select: {
-                  id: true,
-                  name: true,
-                  email: true,
-                  avatar: true,
-                  status: true,
-                },
-              },
-            },
-          },
-        },
-      });
-
-      const existingPrivate = existingPrivateCandidates.find((candidate) => {
-        const ids = candidate.members.map((member) => member.userId);
-        return ids.length === 2 && ids.includes(session.user.id) && ids.includes(targetId);
-      });
-
-      if (existingPrivate) {
-        return NextResponse.json({
-          success: true,
-          chat: {
-            id: existingPrivate.id,
-            name: existingPrivate.name,
-            type: existingPrivate.type,
-            avatar: existingPrivate.avatar,
-            isEncrypted: existingPrivate.isEncrypted,
-            encryptionType: existingPrivate.encryptionType,
-            members: existingPrivate.members.map((m) => m.user),
-            createdAt: existingPrivate.createdAt,
-          },
-          reused: true,
-        });
+      } catch (error) {
+        if (error instanceof CanonicalPrivateChatError) {
+          return NextResponse.json(
+            { error: error.message, code: error.code },
+            { status: error.status },
+          );
+        }
+        return NextResponse.json(
+          { error: 'Failed to create private chat', code: 'PRIVATE_CHAT_CREATE_FAILED' },
+          { status: 500 },
+        );
       }
     }
 
@@ -310,4 +273,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

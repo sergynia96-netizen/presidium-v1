@@ -72,6 +72,7 @@ export const chats = pgTable(
     name: varchar('name', { length: 255 }),
     avatar: text('avatar'),
     isEncrypted: boolean('is_encrypted').default(true).notNull(),
+    privatePairKey: text('private_pair_key'),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     ephemeralTimer: integer('ephemeral_timer').default(0),
     isPublic: boolean('is_public').default(false),
@@ -80,6 +81,9 @@ export const chats = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => [
+    uniqueIndex('chats_private_pair_key_idx')
+      .on(table.privatePairKey)
+      .where(sql`${table.privatePairKey} IS NOT NULL`),
     index('chats_type_idx').on(table.type),
     index('chats_created_idx').on(table.createdAt),
     index('chats_createdby_idx').on(table.createdBy),
