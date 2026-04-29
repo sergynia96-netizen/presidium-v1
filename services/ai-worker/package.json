@@ -13,6 +13,7 @@
   "dependencies": {
     "@presidium/shared-types": "workspace:*",
     "@presidium/shared-crypto": "workspace:*",
+    "@presidium/shared-moderation": "workspace:*",
     "ioredis": "^5.6.0",
     "bullmq": "^5.41.0",
     "zod": "^3.24.0",

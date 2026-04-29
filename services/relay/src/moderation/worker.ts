@@ -19,8 +19,7 @@
 
 import { Worker, type Job } from 'bullmq';
 import type { Redis } from 'ioredis';
-import { runRegexCheck, type RegexMatch } from './rules.js';
-import { runONNXCheck, initONNX } from './onnx.js';
+import { runRegexCheck, type RegexMatch, runONNXCheck, initONNX } from '@presidium/shared-moderation';
 import { db } from '../db/index.js';
 import { messages, users, moderationReports } from '../db/schema.js';
 import { eq, sql } from 'drizzle-orm';

@@ -1,16 +1,8 @@
 /**
- * Tactical local copy of relay moderation logic.
- *
- * TODO: Move shared moderation logic into packages/shared-moderation
- * and import it from both services/relay and services/ai-worker.
- *
- * This file exists to keep ai-worker typecheck/build stable without
- * changing relay exports in this PR.
- *
  * @author Сергей Сергеевич Карнаух
  * @copyright (C) 2026 Сергей Сергеевич Карнаух. All Rights Reserved.
  *
- * Silent Claw — Layer 2: ONNX Runtime (local copy for ai-worker)
+ * Silent Claw — Layer 2: ONNX Runtime
  *
  * Локальный ML inference для toxicity detection.
  * Используем quantized модели для скорости:
@@ -51,7 +43,7 @@ const MODEL_NAME = 'Xenova/toxic-bert';
 
 async function importTransformers(): Promise<TransformersModule> {
   // @xenova/transformers is an optional runtime dependency for local moderation.
-  // Use runtime dynamic import to keep ai-worker typecheck/build independent from it.
+  // Use runtime dynamic import to keep typecheck/build independent from it.
   const dynamicImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<TransformersModule>;
   return dynamicImport('@xenova/transformers');
 }

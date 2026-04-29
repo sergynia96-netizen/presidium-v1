@@ -31,7 +31,8 @@
     "jose": "^5.9.0",
     "zod": "^3.24.0",
     "@presidium/shared-types": "workspace:*",
-    "@presidium/shared-crypto": "workspace:*"
+    "@presidium/shared-crypto": "workspace:*",
+    "@presidium/shared-moderation": "workspace:*"
   },
   "devDependencies": {
     "drizzle-kit": "^0.30.0",

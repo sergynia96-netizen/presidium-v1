@@ -78,6 +78,7 @@ jobs:
           --filter @presidium/relay...
           --filter @presidium/shared-ui...
           --filter @presidium/shared-crypto...
+          --filter @presidium/shared-moderation...
 
       - name: Build shared workspace packages
         run: |
@@ -85,6 +86,7 @@ jobs:
           pnpm --filter @presidium/shared-api build
           pnpm --filter @presidium/shared-crypto build
           pnpm --filter @presidium/shared-ui build
+          pnpm --filter @presidium/shared-moderation build
 
       - name: Typecheck relay
         run: pnpm --filter @presidium/relay typecheck
