@@ -15,8 +15,7 @@
 
 import { Redis } from 'ioredis';
 import { Worker } from 'bullmq';
-import { runRegexCheck } from './moderation/rules.js';
-import { runONNXCheck, initONNX, getONNXInfo } from './moderation/onnx.js';
+import { runRegexCheck, runONNXCheck, initONNX, getONNXInfo } from '@presidium/shared-moderation';
 
 // === CONFIG ===
 

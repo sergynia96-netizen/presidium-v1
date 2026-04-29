@@ -242,6 +242,12 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  packages/shared-moderation:
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/shared-types:
     devDependencies:
       typescript:
@@ -275,6 +281,9 @@ importers:
       '@presidium/shared-crypto':
         specifier: workspace:*
         version: link:../../packages/shared-crypto
+      '@presidium/shared-moderation':
+        specifier: workspace:*
+        version: link:../../packages/shared-moderation
       '@presidium/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -321,6 +330,9 @@ importers:
       '@presidium/shared-crypto':
         specifier: workspace:*
         version: link:../../packages/shared-crypto
+      '@presidium/shared-moderation':
+        specifier: workspace:*
+        version: link:../../packages/shared-moderation
       '@presidium/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
