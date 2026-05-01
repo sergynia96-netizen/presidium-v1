@@ -1,0 +1,116 @@
+{
+  "$schema": "https://dependency-cruiser.github.io/schema/v16.6.0/schema.json",
+  "forbidden": [
+    {
+      "name": "no-cross-app-imports",
+      "comment": "Apps must not import from other apps — use shared packages",
+      "severity": "error",
+      "from": { "path": "^apps/" },
+      "to": { "path": "^apps/", "pathNot": "^apps/(<from_path>)" }
+    },
+    {
+      "name": "no-cross-service-imports",
+      "comment": "Services must not import from other services — use shared packages",
+      "severity": "error",
+      "from": { "path": "^services/" },
+      "to": { "path": "^services/", "pathNot": "^services/(<from_path>)" }
+    },
+    {
+      "name": "no-app-to-service",
+      "comment": "Apps must not import from services — relay/ai-worker are backend-only",
+      "severity": "error",
+      "from": { "path": "^apps/" },
+      "to": { "path": "^services/" }
+    },
+    {
+      "name": "no-service-to-app",
+      "comment": "Services must not import from apps — use shared packages",
+      "severity": "error",
+      "from": { "path": "^services/" },
+      "to": { "path": "^apps/" }
+    },
+    {
+      "name": "no-mini-services-import",
+      "comment": "mini-services/ is not in the workspace — legacy standalone project",
+      "severity": "error",
+      "from": { "path": "^(packages|apps|services)/" },
+      "to": { "path": "^mini-services/" }
+    },
+    {
+      "name": "no-deep-relative-escape",
+      "comment": "Relative imports going up 3+ directories likely cross workspace boundaries",
+      "severity": "warn",
+      "from": {},
+      "to": { "pathLike": "^\\.\\.\\/\\.\\.\\/\\.\\.\\/" }
+    },
+    {
+      "name": "shared-types-leaf",
+      "comment": "shared-types is a leaf package — must not depend on other workspace packages",
+      "severity": "error",
+      "from": { "path": "^packages/shared-types/" },
+      "to": { "path": "^packages/shared-(api|crypto|ui|moderation)/" }
+    },
+    {
+      "name": "shared-crypto-leaf",
+      "comment": "shared-crypto is a leaf package — must not depend on other workspace packages",
+      "severity": "error",
+      "from": { "path": "^packages/shared-crypto/" },
+      "to": { "path": "^packages/shared-(types|api|ui|moderation)/" }
+    },
+    {
+      "name": "shared-ui-leaf",
+      "comment": "shared-ui is a leaf package — must not depend on other workspace packages",
+      "severity": "error",
+      "from": { "path": "^packages/shared-ui/" },
+      "to": { "path": "^packages/shared-(types|api|crypto|moderation)/" }
+    },
+    {
+      "name": "shared-moderation-leaf",
+      "comment": "shared-moderation is a leaf package — must not depend on other workspace packages",
+      "severity": "error",
+      "from": { "path": "^packages/shared-moderation/" },
+      "to": { "path": "^packages/shared-(types|api|crypto|ui)/" }
+    },
+    {
+      "name": "no-circular",
+      "comment": "No circular dependencies allowed",
+      "severity": "error",
+      "from": {},
+      "to": { "circular": true }
+    },
+    {
+      "name": "no-orphans-in-workspace",
+      "comment": "Files in workspace packages should be reachable from their entry point",
+      "severity": "warn",
+      "from": { "path": "^(packages|apps|services)/" },
+      "to": {},
+      "orphan": true
+    }
+  ],
+  "options": {
+    "doNotFollow": {
+      "path": "node_modules"
+    },
+    "tsPreCompilationDeps": true,
+    "tsConfig": {
+      "fileName": "tsconfig.json"
+    },
+    "externalModuleResolutionStrategy": "node_modules",
+    "exoticRequireStrings": ["require\\s*\\(\\s*['\"]\\.{1,2}/"],
+    "enhancedResolveOptions": {
+      "exportsFields": ["exports"],
+      "conditionNames": ["import", "default"]
+    },
+    "reporterOptions": {
+      "tsv": {
+        "columnOrder": [
+          "source", "dependsOn", "couldNotResolve", "circular",
+          "ruleName", "severity", "from", "to", "module", "moduleSystem"
+        ]
+      }
+    },
+    "progress": {
+      "type": "none"
+    }
+  }
+}

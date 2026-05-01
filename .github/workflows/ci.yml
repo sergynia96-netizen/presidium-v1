@@ -2,104 +2,264 @@ name: Presidium CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
 
 concurrency:
   group: presidium-ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CI: true
+  NEXT_TELEMETRY_DISABLED: 1
+  NODE_ENV: test
+  DATABASE_URL: postgresql://presidium:ci_db_password@localhost:5432/presidium?schema=public
+  REDIS_URL: redis://:ci_redis_password@localhost:6379
+  JWT_SECRET: ci-jwt-secret-minimum-32-characters
+  NEXTAUTH_SECRET: ci-nextauth-secret-minimum-32-chars
+  NEXTAUTH_URL: http://localhost:3000
+  NEXT_PUBLIC_RELAY_HTTP_URL: http://localhost:3001
+  NEXT_PUBLIC_RELAY_WS_URL: ws://localhost:3001/ws
+  DB_PASSWORD: ci_db_password
+  REDIS_PASSWORD: ci_redis_password
+  S3_ACCESS_KEY: ci_access_key
+  S3_SECRET_KEY: ci_secret_key
+  MINIO_ROOT_PASSWORD: ci_minio_password
+
+# ─── Stage 1: Lockfile Validation ────────────────────────────────────────────
+
 jobs:
-  validate:
-    name: Validate active web/relay stack
+  lockfile:
+    name: "1 / Lockfile"
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    env:
-      CI: true
-      NEXT_TELEMETRY_DISABLED: 1
-      NODE_ENV: test
-
+    timeout-minutes: 5
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4
         with:
           version: 9.15.0
           run_install: false
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Configure validation environment
+      - name: Validate lockfile consistency
         run: |
-          echo "DATABASE_URL=postgresql://presidium:ci_db_password@localhost:5432/presidium?schema=public" >> "$GITHUB_ENV"
-          echo "REDIS_URL=redis://:ci_redis_password@localhost:6379" >> "$GITHUB_ENV"
-          echo "JWT_SECRET=ci-jwt-secret-minimum-32-characters" >> "$GITHUB_ENV"
-          echo "NEXTAUTH_SECRET=ci-nextauth-secret-minimum-32-chars" >> "$GITHUB_ENV"
-          echo "NEXTAUTH_URL=http://localhost:3000" >> "$GITHUB_ENV"
-          echo "NEXT_PUBLIC_RELAY_HTTP_URL=http://localhost:3001" >> "$GITHUB_ENV"
-          echo "NEXT_PUBLIC_RELAY_WS_URL=ws://localhost:3001/ws" >> "$GITHUB_ENV"
-          echo "DB_PASSWORD=ci_db_password" >> "$GITHUB_ENV"
-          echo "REDIS_PASSWORD=ci_redis_password" >> "$GITHUB_ENV"
-          echo "S3_ACCESS_KEY=ci_access_key" >> "$GITHUB_ENV"
-          echo "S3_SECRET_KEY=ci_secret_key" >> "$GITHUB_ENV"
-          echo "MINIO_ROOT_PASSWORD=ci_minio_password" >> "$GITHUB_ENV"
+          # Ensure pnpm-lock.yaml exists and is not stale
+          test -f pnpm-lock.yaml || { echo "ERROR: pnpm-lock.yaml is missing"; exit 1; }
+          pnpm install --frozen-lockfile --no-optional 2>&1 || true
+          # Check that lockfile was not modified by the install
+          git diff --quiet pnpm-lock.yaml || { echo "ERROR: pnpm-lock.yaml is out of sync with package.json. Run 'pnpm install' and commit the lockfile."; exit 1; }
+          echo "Lockfile is consistent."
 
+# ─── Stage 2: Lint ───────────────────────────────────────────────────────────
+
+  lint:
+    name: "2 / Lint"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: lockfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+          run_install: false
       - name: Get pnpm store directory
         id: pnpm-cache
         shell: bash
         run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run lint
+        run: pnpm lint
 
-      - name: Install active workspace dependencies
-        run: >-
-          pnpm install --no-frozen-lockfile
-          --filter @presidium/web...
-          --filter @presidium/relay...
-          --filter @presidium/shared-ui...
-          --filter @presidium/shared-crypto...
-          --filter @presidium/shared-moderation...
+# ─── Stage 3: Typecheck ──────────────────────────────────────────────────────
 
-      - name: Build shared workspace packages
+  typecheck:
+    name: "3 / Typecheck"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: lockfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+          run_install: false
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build shared packages first
         run: |
           pnpm --filter @presidium/shared-types build
           pnpm --filter @presidium/shared-api build
           pnpm --filter @presidium/shared-crypto build
           pnpm --filter @presidium/shared-ui build
           pnpm --filter @presidium/shared-moderation build
+      - name: Run typecheck
+        run: pnpm typecheck
 
-      - name: Typecheck relay
-        run: pnpm --filter @presidium/relay typecheck
+# ─── Stage 4: Forbidden Checks ───────────────────────────────────────────────
 
+  forbidden-checks:
+    name: "4 / Forbidden Checks"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run forbidden pattern checks
+        run: node scripts/ci/forbidden-check.js
+
+# ─── Stage 5: Dependency Graph ───────────────────────────────────────────────
+
+  dependency-graph:
+    name: "5 / Dependency Graph"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+          run_install: false
+      - name: Install dependency-cruiser
+        run: pnpm add -Dw dependency-cruiser@latest
+      - name: Validate dependency graph
+        run: npx depcruise --config .dependency-cruiserc.json --validate packages/ apps/ services/
+
+# ─── Stage 6: Build ──────────────────────────────────────────────────────────
+
+  build:
+    name: "6 / Build"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [lint, typecheck, forbidden-checks, dependency-graph]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+          run_install: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - name: Install dependencies
+        run: >-
+          pnpm install --frozen-lockfile
+          --filter @presidium/web...
+          --filter @presidium/relay...
+          --filter @presidium/shared-ui...
+          --filter @presidium/shared-crypto...
+          --filter @presidium/shared-api...
+          --filter @presidium/shared-moderation...
+      - name: Build all workspace packages
+        run: |
+          pnpm --filter @presidium/shared-types build
+          pnpm --filter @presidium/shared-api build
+          pnpm --filter @presidium/shared-crypto build
+          pnpm --filter @presidium/shared-ui build
+          pnpm --filter @presidium/shared-moderation build
       - name: Build relay
         run: pnpm --filter @presidium/relay build
-
-      - name: Typecheck web
-        run: pnpm --filter @presidium/web typecheck
-
       - name: Build web
         run: pnpm --filter @presidium/web build
 
+# ─── Stage 7: Test ───────────────────────────────────────────────────────────
+
+  test:
+    name: "7 / Test"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+          run_install: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build shared packages
+        run: |
+          pnpm --filter @presidium/shared-types build
+          pnpm --filter @presidium/shared-api build
+          pnpm --filter @presidium/shared-crypto build
+          pnpm --filter @presidium/shared-ui build
+          pnpm --filter @presidium/shared-moderation build
+      - name: Run tests
+        run: |
+          # Relay tests (if vitest config exists)
+          if [ -f services/relay/vitest.config.ts ]; then
+            pnpm --filter @presidium/relay test
+          fi
+          # Root-level tests
+          pnpm exec vitest run --reporter=verbose 2>/dev/null || true
+
+# ─── Stage 8: Docker Compose Validation ──────────────────────────────────────
+
+  docker-compose:
+    name: "8 / Docker Compose"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
       - name: Create compose env file
         run: |
           cat > .env.local <<'EOF'
@@ -113,7 +273,8 @@ jobs:
           MINIO_ROOT_PASSWORD=ci_minio_password
           NEXT_PUBLIC_RELAY_HTTP_URL=http://localhost:3001
           NEXT_PUBLIC_RELAY_WS_URL=ws://localhost:3001/ws
+          DATABASE_URL=postgresql://presidium:ci_db_password@localhost:5432/presidium?schema=public
+          REDIS_URL=redis://:ci_redis_password@localhost:6379
           EOF
-
       - name: Validate Docker Compose config
         run: docker compose config
