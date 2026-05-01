@@ -1,0 +1,107 @@
+{
+  "$schema": "https://dependency-cruiser.github.io/schema/v16.6.0/schema.json",
+  "forbidden": [
+    {
+      "name": "no-app-to-service",
+      "comment": "Apps must not directly import from services — relay/ai-worker are backend-only",
+      "severity": "error",
+      "from": { "path": "^apps/" },
+      "to": { "path": "^services/" }
+    },
+    {
+      "name": "no-service-to-app",
+      "comment": "Services must not directly import from apps — use shared packages",
+      "severity": "error",
+      "from": { "path": "^services/" },
+      "to": { "path": "^apps/" }
+    },
+    {
+      "name": "no-web-to-other-apps",
+      "comment": "Web must not import from desktop or mobile — use shared packages",
+      "severity": "error",
+      "from": { "path": "^apps/web/" },
+      "to": { "path": "^apps/(desktop|mobile)/" }
+    },
+    {
+      "name": "no-desktop-to-other-apps",
+      "comment": "Desktop must not import from web or mobile — use shared packages",
+      "severity": "error",
+      "from": { "path": "^apps/desktop/" },
+      "to": { "path": "^apps/(web|mobile)/" }
+    },
+    {
+      "name": "no-mobile-to-other-apps",
+      "comment": "Mobile must not import from web or desktop — use shared packages",
+      "severity": "error",
+      "from": { "path": "^apps/mobile/" },
+      "to": { "path": "^apps/(web|desktop)/" }
+    },
+    {
+      "name": "no-mini-services-import",
+      "comment": "mini-services/ is not in the workspace — legacy standalone project",
+      "severity": "error",
+      "from": { "path": "^(packages|apps|services)/" },
+      "to": { "path": "^mini-services/" }
+    },
+    {
+      "name": "shared-types-leaf",
+      "comment": "shared-types is a leaf — must not import other workspace packages",
+      "severity": "error",
+      "from": { "path": "^packages/shared-types/" },
+      "to": { "path": "^packages/shared-(api|crypto|ui|moderation)/" }
+    },
+    {
+      "name": "shared-crypto-leaf",
+      "comment": "shared-crypto is a leaf — must not import other workspace packages",
+      "severity": "error",
+      "from": { "path": "^packages/shared-crypto/" },
+      "to": { "path": "^packages/shared-(types|api|ui|moderation)/" }
+    },
+    {
+      "name": "shared-ui-leaf",
+      "comment": "shared-ui is a leaf — must not import other workspace packages",
+      "severity": "error",
+      "from": { "path": "^packages/shared-ui/" },
+      "to": { "path": "^packages/shared-(types|api|crypto|moderation)/" }
+    },
+    {
+      "name": "shared-moderation-leaf",
+      "comment": "shared-moderation is a leaf — must not import other workspace packages",
+      "severity": "error",
+      "from": { "path": "^packages/shared-moderation/" },
+      "to": { "path": "^packages/shared-(types|api|crypto|ui)/" }
+    },
+    {
+      "name": "no-circular",
+      "comment": "No circular dependencies allowed",
+      "severity": "warn",
+      "from": {},
+      "to": { "circular": true }
+    },
+    {
+      "name": "no-orphans-in-workspace",
+      "comment": "Workspace files should be reachable from their package entry point",
+      "severity": "warn",
+      "from": { "path": "^(packages|apps|services)/", "orphan": true },
+      "to": {}
+    }
+  ],
+  "options": {
+    "doNotFollow": {
+      "path": "node_modules"
+    },
+    "tsPreCompilationDeps": true,
+    "tsConfig": {
+      "fileName": "tsconfig.json"
+    },
+    "externalModuleResolutionStrategy": "node_modules",
+    "exoticRequireStrings": ["require\\s*\\(\\s*['\"]\\.{1,2}/"],
+    "enhancedResolveOptions": {
+      "exportsFields": ["exports"],
+      "conditionNames": ["import", "default"]
+    },
+    "progress": {
+      "type": "none"
+    }
+  }
+}
