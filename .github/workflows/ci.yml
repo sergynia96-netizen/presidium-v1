@@ -118,6 +118,7 @@ jobs:
           pnpm --filter @presidium/shared-crypto build
           pnpm --filter @presidium/shared-ui build
           pnpm --filter @presidium/shared-moderation build
+          pnpm --filter @presidium/shared-messaging build
       - name: Run typecheck
         run: pnpm typecheck
 
@@ -193,6 +194,7 @@ jobs:
           --filter @presidium/shared-crypto...
           --filter @presidium/shared-api...
           --filter @presidium/shared-moderation...
+          --filter @presidium/shared-messaging...
       - name: Build all workspace packages
         run: |
           pnpm --filter @presidium/shared-types build
@@ -200,6 +202,7 @@ jobs:
           pnpm --filter @presidium/shared-crypto build
           pnpm --filter @presidium/shared-ui build
           pnpm --filter @presidium/shared-moderation build
+          pnpm --filter @presidium/shared-messaging build
       - name: Build relay
         run: pnpm --filter @presidium/relay build
       - name: Build web
@@ -243,8 +246,10 @@ jobs:
           pnpm --filter @presidium/shared-crypto build
           pnpm --filter @presidium/shared-ui build
           pnpm --filter @presidium/shared-moderation build
+          pnpm --filter @presidium/shared-messaging build
       - name: Run tests
         run: |
+          pnpm --filter @presidium/shared-messaging test
           # Relay tests (if vitest config exists)
           if [ -f services/relay/vitest.config.ts ]; then
             pnpm --filter @presidium/relay test
