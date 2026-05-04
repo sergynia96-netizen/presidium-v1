@@ -82,7 +82,8 @@ function toTimestampMs(date: Date | null): TimestampMs | undefined {
  * tests can provide a mock or in-memory alternative.
  */
 export class DrizzleOutboxRepository implements OutboxRepository {
-  constructor(private readonly db: PostgresJsDatabase) {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  constructor(private readonly db: PostgresJsDatabase<any>) {}
 
   // ── enqueue ──────────────────────────────────────────────────────────────
 
