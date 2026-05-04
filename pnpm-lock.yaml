@@ -343,6 +343,9 @@ importers:
       '@presidium/shared-crypto':
         specifier: workspace:*
         version: link:../../packages/shared-crypto
+      '@presidium/shared-messaging':
+        specifier: workspace:*
+        version: link:../../packages/shared-messaging
       '@presidium/shared-moderation':
         specifier: workspace:*
         version: link:../../packages/shared-moderation

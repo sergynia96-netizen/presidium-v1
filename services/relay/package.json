@@ -32,6 +32,7 @@
     "zod": "^3.24.0",
     "@presidium/shared-types": "workspace:*",
     "@presidium/shared-crypto": "workspace:*",
+    "@presidium/shared-messaging": "workspace:*",
     "@presidium/shared-moderation": "workspace:*"
   },
   "devDependencies": {
