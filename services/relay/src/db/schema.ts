@@ -173,6 +173,40 @@ export const messageReads = pgTable(
   ]
 );
 
+// === OUTBOX ===
+
+export const outbox = pgTable(
+  'outbox',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    messageId: uuid('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    recipientId: uuid('recipient_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: varchar('status', { length: 20 }).notNull().default('pending'),
+    retryCount: integer('retry_count').notNull().default(0),
+    maxRetries: integer('max_retries').notNull().default(5),
+    enqueuedAt: timestamp('enqueued_at', { withTimezone: true }).notNull().defaultNow(),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }),
+    lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    lastError: text('last_error'),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('outbox_status_next_attempt_idx')
+      .on(table.status, table.nextAttemptAt)
+      .where(sql`${table.status} IN ('pending', 'failed')`),
+    index('outbox_message_id_idx').on(table.messageId),
+    index('outbox_recipient_id_idx').on(table.recipientId),
+    index('outbox_updated_at_idx').on(table.updatedAt),
+  ]
+);
+
 // === STORIES ===
 
 export const stories = pgTable(
@@ -553,6 +587,18 @@ export const messagesRelations = relations(messages, ({ one, many }) => ({
     references: [users.id],
   }),
   readReceipts: many(messageReads),
+  outboxEntries: many(outbox),
+}));
+
+export const outboxRelations = relations(outbox, ({ one }) => ({
+  message: one(messages, {
+    fields: [outbox.messageId],
+    references: [messages.id],
+  }),
+  recipient: one(users, {
+    fields: [outbox.recipientId],
+    references: [users.id],
+  }),
 }));
 
 export const storiesRelations = relations(stories, ({ one, many }) => ({
