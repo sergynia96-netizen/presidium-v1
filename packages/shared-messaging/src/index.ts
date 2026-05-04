@@ -43,6 +43,14 @@ export type {
 export type {
   OutboxMessage,
   InboxMessage,
+  OutboxStatus,
+  OutboxEntry,
+  RetryPolicy,
+} from './delivery.js';
+
+export {
+  computeRetryDelay,
+  DEFAULT_RETRY_POLICY,
 } from './delivery.js';
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
@@ -51,6 +59,9 @@ export {
   InvalidDeliveryTransitionError,
   DuplicateMessageError,
   InvalidConversationError,
+  RepositoryNotFoundError,
+  RepositoryConcurrencyError,
+  RepositoryConflictError,
 } from './errors.js';
 
 // ─── State Helpers ───────────────────────────────────────────────────────────
@@ -64,3 +75,23 @@ export {
   registerInboundEnvelope,
   isDuplicateMessage,
 } from './state.js';
+
+// ─── Query Types ─────────────────────────────────────────────────────────────
+export type {
+  MessageSortField,
+  SortDirection,
+  SortOptions,
+  MessageFilter,
+  ConversationFilter,
+  CursorPagination,
+  OffsetPagination,
+  Pagination,
+  PaginatedResult,
+} from './query.js';
+
+// ─── Repository Interfaces ──────────────────────────────────────────────────
+export type {
+  MessageRepository,
+  OutboxRepository,
+  ConversationRepository,
+} from './repository.js';
