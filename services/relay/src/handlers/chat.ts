@@ -25,6 +25,8 @@ import type { WsMessage } from '@presidium/shared-types';
 import type { ExtendedWebSocket } from '../ws/handler.js';
 import { db } from '../db/index.js';
 import { chatMembers, messages } from '../db/schema.js';
+import { DrizzleOutboxRepository } from '../db/repositories/index.js';
+import type { OutboxEntry, TimestampMs } from '../types/messaging.js';
 
 const processedMessages = new Set<string>();
 const DEDUP_WINDOW_MS = 300_000;
@@ -294,6 +296,31 @@ export async function handleChatMessage(
     } catch (err) {
       console.warn('[Chat] Failed to fetch presence:', err);
       presenceResults = memberIds.map(() => null);
+    }
+  }
+
+  // ── Outbox: enqueue delivery tracking for each recipient ──────────────
+  // Fire-and-forget: outbox failure must NOT block message delivery.
+  if (memberIds.length > 0) {
+    try {
+      const outboxRepo = new DrizzleOutboxRepository(db);
+      const nowMs = Date.now() as unknown as TimestampMs;
+      const baseEntry: Omit<OutboxEntry, 'messageId'> = {
+        status: 'pending',
+        retryCount: 0,
+        enqueuedAt: nowMs,
+        version: 1,
+      };
+
+      const enqueuePromises = memberIds.map((memberId) =>
+        outboxRepo.enqueue(
+          { ...baseEntry, messageId: message.id as unknown as OutboxEntry['messageId'] },
+          { recipientId: memberId as unknown as import('../types/messaging.js').UserId },
+        ),
+      );
+      await Promise.all(enqueuePromises);
+    } catch (err) {
+      console.warn('[Chat] Failed to enqueue outbox entries:', err);
     }
   }
 
