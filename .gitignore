@@ -62,3 +62,15 @@ upload/
 *.tmp-start.log
 
 examples/
+
+# Rust
+target/
+# Cargo.lock - only commit for binary projects
+# Cargo.lock
+**/*.rs.bk
+
+# Python (если используется)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
